@@ -80,7 +80,6 @@ jobs:
               $tooShort += $name
             }
             else {
-              # فقط طول رو نشون میدیم، نه مقدار رو
               Write-Host "  ✅ $name : OK (طول=$($val.Length))" -ForegroundColor Green
             }
           }
@@ -123,118 +122,105 @@ jobs:
           Write-Host ""
           Write-Host "  ✅ [1/4] همه متغیرها معتبر هستند" -ForegroundColor Green
           Write-Host ""
-          
-          # ============================================================
-# STEP 2: PRE-FLIGHT - تست اتصال Backblaze B2
-# ============================================================
-- name: "🔍 [2/4] تست اتصال Backblaze B2"
-  shell: pwsh
-  run: |
-    Write-Host ""
-    Write-Host "  ┌──────────────────────────────────────────────────────┐" -ForegroundColor Yellow
-    Write-Host "  │  تست اتصال و احراز هویت Backblaze B2                │" -ForegroundColor Yellow
-    Write-Host "  └──────────────────────────────────────────────────────┘" -ForegroundColor Yellow
-    Write-Host ""
 
-    # نصب AWS CLI
-    Write-Host "  📦 نصب AWS CLI..." -ForegroundColor Cyan
-    $installer = "$env:TEMP\AWSCLIV2.msi"
-    try {
-      if (-not (Test-Path "C:\Program Files\Amazon\AWSCLIV2\aws.exe")) {
-        Invoke-WebRequest -Uri "https://awscli.amazonaws.com/AWSCLIV2.msi" -OutFile $installer -UseBasicParsing -ErrorAction Stop
-        Start-Process msiexec.exe -ArgumentList "/i $installer /quiet /norestart" -Wait
-        Start-Sleep -Seconds 5
-      }
-      $aws = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
-      if (-not (Test-Path $aws)) {
-        throw "AWS CLI نصب نشد"
-      }
-      $ver = & $aws --version 2>&1
-      Write-Host "  ✅ AWS CLI آماده: $ver" -ForegroundColor Green
-    } catch {
-      Write-Host "  ❌ نصب AWS CLI ناموفق: $_" -ForegroundColor Red
-      exit 1
-    }
+      # ============================================================
+      # STEP 2: PRE-FLIGHT - تست اتصال Backblaze B2
+      # ============================================================
+      - name: "🔍 [2/4] تست اتصال Backblaze B2"
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "  ┌──────────────────────────────────────────────────────┐" -ForegroundColor Yellow
+          Write-Host "  │  تست اتصال و احراز هویت Backblaze B2                │" -ForegroundColor Yellow
+          Write-Host "  └──────────────────────────────────────────────────────┘" -ForegroundColor Yellow
+          Write-Host ""
 
-    Write-Host ""
-    $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
-    $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
-    $env:AWS_DEFAULT_REGION    = $env:B2_REGION
+          # نصب AWS CLI
+          Write-Host "  📦 نصب AWS CLI..." -ForegroundColor Cyan
+          $installer = "$env:TEMP\AWSCLIV2.msi"
+          try {
+            if (-not (Test-Path "C:\Program Files\Amazon\AWSCLIV2\aws.exe")) {
+              Invoke-WebRequest -Uri "https://awscli.amazonaws.com/AWSCLIV2.msi" -OutFile $installer -UseBasicParsing -ErrorAction Stop
+              Start-Process msiexec.exe -ArgumentList "/i $installer /quiet /norestart" -Wait
+              Start-Sleep -Seconds 5
+            }
+            $aws = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
+            if (-not (Test-Path $aws)) {
+              throw "AWS CLI نصب نشد"
+            }
+            $ver = & $aws --version 2>&1
+            Write-Host "  ✅ AWS CLI آماده: $ver" -ForegroundColor Green
+          } catch {
+            Write-Host "  ❌ نصب AWS CLI ناموفق: $_" -ForegroundColor Red
+            exit 1
+          }
 
-    $endpoint = "https://$env:B2_ENDPOINT"
+          Write-Host ""
+          $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
+          $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
+          $env:AWS_DEFAULT_REGION    = $env:B2_REGION
 
-    # ════════════════════════════════════════════════════════
-    # تست ۱: دسترسی به خود باکِت (head-bucket)
-    # این با کلیدهای محدود به باکِت هم کار می‌کند
-    # ════════════════════════════════════════════════════════
-    Write-Host "  🔐 تست دسترسی به باکِت '$env:B2_BUCKET'..." -ForegroundColor Cyan
-    $head = & $aws s3api head-bucket --bucket $env:B2_BUCKET --endpoint-url $endpoint 2>&1
-    $headExit = $LASTEXITCODE
+          $endpoint = "https://$env:B2_ENDPOINT"
 
-    if ($headExit -ne 0) {
-      Write-Host "  ❌ دسترسی به باکِت ناموفق!" -ForegroundColor Red
-      Write-Host ""
-      Write-Host "  جزئیات خطا:" -ForegroundColor Yellow
-      Write-Host "  $head" -ForegroundColor Gray
-      Write-Host ""
-      Write-Host "  دلایل محتمل:" -ForegroundColor Yellow
-      Write-Host "    • نام باکِت اشتباه است (به حروف بزرگ/کوچک حساس است)" -ForegroundColor Gray
-      Write-Host "    • کلید B2 به این باکِت دسترسی ندارد" -ForegroundColor Gray
-      Write-Host "    • B2_KEY_ID یا B2_APP_KEY اشتباه است" -ForegroundColor Gray
-      Write-Host "    • کلید revoke شده یا منقضی شده" -ForegroundColor Gray
-      Write-Host "    • B2_ENDPOINT اشتباه است (باید با منطقه باکِت هم‌خوان باشد)" -ForegroundColor Gray
-      Write-Host ""
-      Write-Host "  💡 نکته: کلید B2 باید حداقل دسترسی read+write به این باکِت داشته باشد." -ForegroundColor Yellow
-      exit 1
-    }
-    Write-Host "  ✅ دسترسی به باکِت OK" -ForegroundColor Green
+          # تست ۱: دسترسی به خود باکِت
+          Write-Host "  🔐 تست دسترسی به باکِت '$env:B2_BUCKET'..." -ForegroundColor Cyan
+          $head = & $aws s3api head-bucket --bucket $env:B2_BUCKET --endpoint-url $endpoint 2>&1
+          $headExit = $LASTEXITCODE
 
-    # ════════════════════════════════════════════════════════
-    # تست ۲: دسترسی نوشتن (put + delete)
-    # ════════════════════════════════════════════════════════
-    Write-Host ""
-    Write-Host "  📝 تست دسترسی نوشتن..." -ForegroundColor Cyan
-    $testFile = "$env:TEMP\b2-test-$(Get-Random).txt"
-    "connectivity test" | Out-File -FilePath $testFile -Encoding utf8
-    $testKey = "_connectivity-test.txt"
+          if ($headExit -ne 0) {
+            Write-Host "  ❌ دسترسی به باکِت ناموفق!" -ForegroundColor Red
+            Write-Host ""
+            Write-Host "  جزئیات خطا:" -ForegroundColor Yellow
+            Write-Host "  $head" -ForegroundColor Gray
+            Write-Host ""
+            Write-Host "  دلایل محتمل:" -ForegroundColor Yellow
+            Write-Host "    • نام باکِت اشتباه است (به حروف بزرگ/کوچک حساس است)" -ForegroundColor Gray
+            Write-Host "    • کلید B2 به این باکِت دسترسی ندارد" -ForegroundColor Gray
+            Write-Host "    • B2_KEY_ID یا B2_APP_KEY اشتباه است" -ForegroundColor Gray
+            Write-Host "    • کلید revoke شده یا منقضی شده" -ForegroundColor Gray
+            Write-Host "    • B2_ENDPOINT اشتباه است" -ForegroundColor Gray
+            Write-Host ""
+            Write-Host "  💡 نکته: کلید B2 باید حداقل دسترسی read+write به این باکِت داشته باشد." -ForegroundColor Yellow
+            exit 1
+          }
+          Write-Host "  ✅ دسترسی به باکِت OK" -ForegroundColor Green
 
-    $put = & $aws s3 cp $testFile "s3://$env:B2_BUCKET/$testKey" --endpoint-url $endpoint --no-progress 2>&1
-    if ($LASTEXITCODE -ne 0) {
-      Write-Host "  ❌ دسترسی نوشتن ندارد!" -ForegroundColor Red
-      Write-Host ""
-      Write-Host "  جزئیات: $put" -ForegroundColor Gray
-      Write-Host ""
-      Write-Host "  💡 کلید B2 باید دسترسی writeFiles داشته باشد." -ForegroundColor Yellow
-      Remove-Item $testFile -Force -ErrorAction SilentlyContinue
-      exit 1
-    }
-    Write-Host "  ✅ دسترسی نوشتن OK" -ForegroundColor Green
+          # تست ۲: دسترسی نوشتن
+          Write-Host ""
+          Write-Host "  📝 تست دسترسی نوشتن..." -ForegroundColor Cyan
+          $testFile = "$env:TEMP\b2-test-$(Get-Random).txt"
+          "connectivity test" | Out-File -FilePath $testFile -Encoding utf8
+          $testKey = "_connectivity-test.txt"
 
-    Write-Host "  🗑️  پاکسازی فایل تست..." -ForegroundColor Cyan
-    & $aws s3 rm "s3://$env:B2_BUCKET/$testKey" --endpoint-url $endpoint 2>&1 | Out-Null
-    Remove-Item $testFile -Force -ErrorAction SilentlyContinue
+          $put = & $aws s3 cp $testFile "s3://$env:B2_BUCKET/$testKey" --endpoint-url $endpoint --no-progress 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "  ❌ دسترسی نوشتن ندارد!" -ForegroundColor Red
+            Write-Host ""
+            Write-Host "  جزئیات: $put" -ForegroundColor Gray
+            Write-Host ""
+            Write-Host "  💡 کلید B2 باید دسترسی writeFiles داشته باشد." -ForegroundColor Yellow
+            Remove-Item $testFile -Force -ErrorAction SilentlyContinue
+            exit 1
+          }
+          Write-Host "  ✅ دسترسی نوشتن OK" -ForegroundColor Green
 
-    # ════════════════════════════════════════════════════════
-    # تست ۳: بررسی وجود بکاپ قبلی (بدون لیست کردن)
-    # ════════════════════════════════════════════════════════
-    Write-Host ""
-    Write-Host "  📂 بررسی وجود بکاپ قبلی..." -ForegroundColor Cyan
-    $obj = & $aws s3api head-object --bucket $env:B2_BUCKET --key "userdata.zip" --endpoint-url $endpoint 2>&1
-    if ($LASTEXITCODE -eq 0) {
-      try {
-        $sizeInfo = ($obj | ConvertFrom-Json).ContentLength
-        $sizeMB = [math]::Round($sizeInfo / 1MB, 2)
-        Write-Host "  ✅ بکاپ قبلی پیدا شد: $sizeMB MB" -ForegroundColor Green
-      } catch {
-        Write-Host "  ✅ بکاپ قبلی پیدا شد" -ForegroundColor Green
-      }
-    } else {
-      Write-Host "  ℹ️  بکاپ قبلی وجود ندارد (اولین اجرا)" -ForegroundColor Yellow
-    }
+          Write-Host "  🗑️  پاکسازی فایل تست..." -ForegroundColor Cyan
+          & $aws s3 rm "s3://$env:B2_BUCKET/$testKey" --endpoint-url $endpoint 2>&1 | Out-Null
+          Remove-Item $testFile -Force -ErrorAction SilentlyContinue
 
-    Write-Host ""
-    Write-Host "  ✅ [2/4] Backblaze B2 کاملاً آماده است" -ForegroundColor Green
-    Write-Host ""
+          # تست ۳: بررسی وجود بکاپ قبلی
+          Write-Host ""
+          Write-Host "  📂 بررسی وجود بکاپ قبلی..." -ForegroundColor Cyan
+          $obj = & $aws s3api head-object --bucket $env:B2_BUCKET --key "userdata.zip" --endpoint-url $endpoint 2>&1
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "  ✅ بکاپ قبلی پیدا شد" -ForegroundColor Green
+          } else {
+            Write-Host "  ℹ️  بکاپ قبلی وجود ندارد (اولین اجرا)" -ForegroundColor Yellow
+          }
+
+          Write-Host ""
+          Write-Host "  ✅ [2/4] Backblaze B2 کاملاً آماده است" -ForegroundColor Green
+          Write-Host ""
 
       # ============================================================
       # STEP 3: PRE-FLIGHT - تست اتصال Tailscale
@@ -248,7 +234,6 @@ jobs:
           Write-Host "  └──────────────────────────────────────────────────────┘" -ForegroundColor Yellow
           Write-Host ""
 
-          # بررسی دسترسی به سرور Tailscale
           Write-Host "  🌐 بررسی دسترسی به login.tailscale.com..." -ForegroundColor Cyan
           try {
             $resp = Invoke-WebRequest -Uri "https://login.tailscale.com" -Method Head -TimeoutSec 15 -UseBasicParsing -ErrorAction Stop
@@ -258,7 +243,6 @@ jobs:
             exit 1
           }
 
-          # دانلود نصب‌کننده
           Write-Host ""
           Write-Host "  📦 دانلود نصب‌کننده Tailscale..." -ForegroundColor Cyan
           $msiPath = "C:\tailscale.msi"
@@ -272,7 +256,6 @@ jobs:
             exit 1
           }
 
-          # نصب
           Write-Host ""
           Write-Host "  🔧 نصب Tailscale..." -ForegroundColor Cyan
           Start-Process msiexec -ArgumentList "/i $msiPath /quiet /norestart" -Wait
@@ -285,7 +268,6 @@ jobs:
           }
           Write-Host "  ✅ Tailscale نصب شد" -ForegroundColor Green
 
-          # تست احراز هویت بدون اتصال کامل
           Write-Host ""
           Write-Host "  🔐 تست اعتبار AuthKey..." -ForegroundColor Cyan
           $hostname = "github-rdp-$(Get-Random -Maximum 9999)"
@@ -307,7 +289,6 @@ jobs:
 
           Start-Sleep -Seconds 15
 
-          # تأیید اتصال
           $tsIP = & $tsExe ip -4 2>&1
           if ([string]::IsNullOrWhiteSpace($tsIP) -or $tsIP -match 'error') {
             Write-Host "  ❌ Tailscale IP دریافت نشد" -ForegroundColor Red
@@ -331,7 +312,6 @@ jobs:
           Write-Host $tsStatus -ForegroundColor Gray
           Write-Host ""
 
-          # ذخیره اطلاعات برای مراحل بعدی
           "TAILSCALE_IP=$tsIP" | Out-File -FilePath "$env:GITHUB_ENV" -Append -Encoding utf8
           "TAILSCALE_HOSTNAME=$hostname" | Out-File -FilePath "$env:GITHUB_ENV" -Append -Encoding utf8
 
@@ -420,7 +400,6 @@ jobs:
           $aws = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
           $endpoint = "https://$env:B2_ENDPOINT"
 
-          # بررسی وجود بکاپ
           & $aws s3api head-object --bucket $env:B2_BUCKET --key "userdata.zip" --endpoint-url $endpoint 2>$null | Out-Null
           if ($LASTEXITCODE -ne 0) {
             Write-Host "  ℹ️  بکاپ قبلی وجود ندارد - اولین اجرا" -ForegroundColor Yellow
@@ -502,7 +481,6 @@ jobs:
             $h = [math]::Floor($remaining / 60)
             $m = $remaining % 60
 
-            # هر ۵ دقیقه یک لاگ کامل‌تر
             if ($i % 5 -eq 0 -or $i -eq 1) {
               $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
               $tsIP = & $tsExe ip -4 2>&1
@@ -557,7 +535,6 @@ jobs:
           Copy-Folder "$userDir\Pictures"  "Pictures"
           Copy-Folder "$userDir\Videos"    "Videos"
 
-          # Chrome
           $chromeSrc = "$userDir\AppData\Local\Google\Chrome\User Data\Default"
           $chromeDst = "$stage\AppData\Local\Google\Chrome\User Data\Default"
           if (Test-Path $chromeSrc) {
@@ -569,7 +546,6 @@ jobs:
             Write-Host "    ✅ Chrome: $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
           }
 
-          # Telegram
           $tgSrc = "$userDir\AppData\Roaming\Telegram Desktop\tdata"
           $tgDst = "$stage\AppData\Roaming\Telegram Desktop\tdata"
           if (Test-Path $tgSrc) {
@@ -591,70 +567,4 @@ jobs:
               Write-Host "  ⚠️  بیشتر از 10GB - حذف Downloads..." -ForegroundColor Red
               Remove-Item "$stage\Downloads" -Recurse -Force -ErrorAction SilentlyContinue
               Remove-Item $zipPath -Force
-              Compress-Archive -Path "$stage\*" -DestinationPath $zipPath -Force -CompressionLevel Optimal
-              Write-Host "  ✅ حجم جدید: $([math]::Round((Get-Item $zipPath).Length/1GB,3)) GB" -ForegroundColor Green
-            }
-          }
-
-          Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
-          Write-Host ""
-
-      # ============================================================
-      # STEP 11: Upload to B2
-      # ============================================================
-      - name: "☁️  آپلود بکاپ به B2"
-        if: always()
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          Write-Host ""
-          Write-Host "  ── آپلود به B2 ──" -ForegroundColor Magenta
-
-          $zipPath = "C:\userdata.zip"
-          if (-not (Test-Path $zipPath)) {
-            Write-Host "  ⏭️  فایل بکاپی وجود ندارد" -ForegroundColor Yellow
-            exit 0
-          }
-
-          $sizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
-          Write-Host "  📊 حجم: $sizeMB MB" -ForegroundColor Cyan
-
-          $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
-          $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
-          $env:AWS_DEFAULT_REGION    = $env:B2_REGION
-          $aws = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
-          $endpoint = "https://$env:B2_ENDPOINT"
-
-          $uploaded = $false
-          for ($attempt = 1; $attempt -le 5; $attempt++) {
-            Write-Host "  🔄 تلاش $attempt/5..." -ForegroundColor Cyan
-            & $aws s3 cp $zipPath "s3://$env:B2_BUCKET/userdata.zip" --endpoint-url $endpoint --no-progress
-            if ($LASTEXITCODE -eq 0) {
-              $uploaded = $true
-              break
-            }
-            Start-Sleep -Seconds 15
-          }
-
-          if ($uploaded) {
-            Write-Host "  ✅ آپلود با موفقیت انجام شد" -ForegroundColor Green
-          } else {
-            Write-Host "  ❌ آپلود پس از 5 تلاش ناموفق" -ForegroundColor Red
-          }
-          Write-Host ""
-
-      # ============================================================
-      # STEP 12: Summary
-      # ============================================================
-      - name: "📊 خلاصه نهایی"
-        if: always()
-        shell: pwsh
-        run: |
-          Write-Host ""
-          Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-          Write-Host "  ║                  خلاصه اجرا                          ║" -ForegroundColor Cyan
-          Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Cyan
-          Write-Host ""
-          Write-Host "  🕐 پایان    : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
-          Write-Host "  📌 وضعیت   : ${{ job.status }}" -ForegroundColor Gray
-          Write-Host ""
+              Compress-Archive -Path "$stage\
