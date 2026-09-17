@@ -222,7 +222,6 @@ jobs:
           Write-Host "  ✅ [2/4] Backblaze B2 کاملاً آماده است" -ForegroundColor Green
           Write-Host ""
 
-          # اطمینان از خروج موفق - چون head-object ممکنه exit code غیر صفر بده
           $global:LASTEXITCODE = 0
           exit 0
 
@@ -238,15 +237,24 @@ jobs:
           Write-Host "  └──────────────────────────────────────────────────────┘" -ForegroundColor Yellow
           Write-Host ""
 
-          Write-Host "  🌐 بررسی دسترسی به login.tailscale.com..." -ForegroundColor Cyan
+          # بررسی دسترسی به سرور Tailscale با TCP (نه HTTP - چون HEAD رو بلاک می‌کنه)
+          Write-Host "  🌐 بررسی دسترسی به Tailscale..." -ForegroundColor Cyan
           try {
-            $resp = Invoke-WebRequest -Uri "https://login.tailscale.com" -Method Head -TimeoutSec 15 -UseBasicParsing -ErrorAction Stop
-            Write-Host "  ✅ Tailscale در دسترس است (HTTP $($resp.StatusCode))" -ForegroundColor Green
+            $tcp = New-Object System.Net.Sockets.TcpClient
+            $connect = $tcp.BeginConnect("login.tailscale.com", 443, $null, $null)
+            $success = $connect.AsyncWaitHandle.WaitOne(10000, $false)
+            if (-not $success) {
+              throw "اتصال TCP timeout شد"
+            }
+            $tcp.EndConnect($connect)
+            $tcp.Close()
+            Write-Host "  ✅ Tailscale در دسترس است (TCP:443)" -ForegroundColor Green
           } catch {
             Write-Host "  ❌ اتصال به Tailscale ناموفق: $_" -ForegroundColor Red
             exit 1
           }
 
+          # دانلود نصب‌کننده
           Write-Host ""
           Write-Host "  📦 دانلود نصب‌کننده Tailscale..." -ForegroundColor Cyan
           $msiPath = "C:\tailscale.msi"
@@ -260,6 +268,7 @@ jobs:
             exit 1
           }
 
+          # نصب
           Write-Host ""
           Write-Host "  🔧 نصب Tailscale..." -ForegroundColor Cyan
           Start-Process msiexec -ArgumentList "/i $msiPath /quiet /norestart" -Wait
@@ -272,8 +281,9 @@ jobs:
           }
           Write-Host "  ✅ Tailscale نصب شد" -ForegroundColor Green
 
+          # اتصال با AuthKey
           Write-Host ""
-          Write-Host "  🔐 تست اعتبار AuthKey..." -ForegroundColor Cyan
+          Write-Host "  🔐 تست اعتبار AuthKey و اتصال..." -ForegroundColor Cyan
           $hostname = "github-rdp-$(Get-Random -Maximum 9999)"
           $connectOutput = & $tsExe up --authkey="$env:TAILSCALE_AUTHKEY" --hostname=$hostname --accept-routes 2>&1
           $connectExit = $LASTEXITCODE
@@ -293,6 +303,7 @@ jobs:
 
           Start-Sleep -Seconds 15
 
+          # تأیید اتصال و IP
           $tsIP = & $tsExe ip -4 2>&1
           if ([string]::IsNullOrWhiteSpace($tsIP) -or $tsIP -match 'error') {
             Write-Host "  ❌ Tailscale IP دریافت نشد" -ForegroundColor Red
@@ -544,7 +555,6 @@ jobs:
             } else {
               Write-Host "    ⏭️  $Source یافت نشد" -ForegroundColor DarkGray
             }
-            # robocopy exit codes غیر صفر داره - ریست کن
             $global:LASTEXITCODE = 0
           }
 
@@ -612,8 +622,7 @@ jobs:
 
           $zipPath = "C:\userdata.zip"
           if (-not (Test-Path $zipPath)) {
-            Write-Host "  ⏭️  فایل بکاپی وجود ندارد" -ForegroundColor Yellow
-            $global:LASTEXITCODE = 0
+            Write-Host "  ⏭️  فایل بکاپی وجود ندارد" -ForegroundColor Yellow            $global:LASTEXITCODE = 0
             exit 0
           }
 
