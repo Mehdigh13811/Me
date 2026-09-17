@@ -1,0 +1,430 @@
+name: Windows Cloud RDP (Auto Backup to B2)
+
+on:
+  workflow_dispatch:
+
+# ============================================================
+# ⚙️  تنظیمات - اینجا ویرایش کن
+# ============================================================
+env:
+  # --- RDP Password ---
+  RDP_PASSWORD: "Mehdi@13579@#$"
+
+  # --- Tailscale Auth Key ---
+  TAILSCALE_AUTHKEY: "tskey-auth-kM5gcJDL9B21CNTRL-dBrSevCy22avgAJ5j2kS2aviVpoQNKrF"
+
+  # --- Backblaze B2 ---
+  B2_KEY_ID: "0047c90ff6f40880000000002"
+  B2_APP_KEY: "K004W7aucG3oanWJ/hrZIk8f3HS6nWA"
+  B2_BUCKET: "Mehdigh1381"
+  B2_ENDPOINT: "s3.us-west-004.backblazeb2.com"
+  B2_REGION: "us-west-004"
+
+# ============================================================
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 355
+
+    steps:
+      # ============================================================
+      # STEP 0: Welcome & Debug
+      # ============================================================
+      - name: "Welcome & Debug"
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "  ======================================================" -ForegroundColor Cyan
+          Write-Host "     GITHUB WINDOWS RDP - v4.0" -ForegroundColor Cyan
+          Write-Host "  ======================================================" -ForegroundColor Cyan
+          Write-Host ""
+          Write-Host "  Start time : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
+          Write-Host "  Hostname   : $env:COMPUTERNAME" -ForegroundColor Gray
+          Write-Host ""
+          Write-Host "  --- Config Check ---" -ForegroundColor Yellow
+
+          $vars = @{
+            "RDP_PASSWORD"      = $env:RDP_PASSWORD
+            "TAILSCALE_AUTHKEY" = $env:TAILSCALE_AUTHKEY
+            "B2_KEY_ID"         = $env:B2_KEY_ID
+            "B2_APP_KEY"        = $env:B2_APP_KEY
+            "B2_BUCKET"         = $env:B2_BUCKET
+            "B2_ENDPOINT"       = $env:B2_ENDPOINT
+            "B2_REGION"         = $env:B2_REGION
+          }
+
+          foreach ($k in $vars.Keys) {
+            if ([string]::IsNullOrEmpty($vars[$k])) {
+              Write-Host "  [❌ MISSING] $k" -ForegroundColor Red
+            } else {
+              Write-Host "  [✅ OK] $k (length: $($vars[$k].Length))" -ForegroundColor Green
+            }
+          }
+          Write-Host ""
+
+      # ============================================================
+      # STEP 1: Checkout
+      # ============================================================
+      - name: "Checkout Repository"
+        uses: actions/checkout@v4
+
+      # ============================================================
+      # STEP 2: Install AWS CLI
+      # ============================================================
+      - name: "Install AWS CLI"
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "  --- Installing AWS CLI ---" -ForegroundColor Yellow
+          try {
+            $installer = "$env:TEMP\AWSCLIV2.msi"
+            Invoke-WebRequest -Uri "https://awscli.amazonaws.com/AWSCLIV2.msi" -OutFile $installer
+            Start-Process msiexec.exe -ArgumentList "/i $installer /quiet" -Wait
+            $awsVersion = & "C:\Program Files\Amazon\AWSCLIV2\aws.exe" --version
+            Write-Host "  [OK] AWS CLI installed: $awsVersion" -ForegroundColor Green
+          } catch {
+            Write-Host "  [ERROR] AWS CLI install failed: $_" -ForegroundColor Red
+          }
+
+      # ============================================================
+      # STEP 3: Enable RDP
+      # ============================================================
+      - name: "Enable Remote Desktop"
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "  --- Enabling RDP ---" -ForegroundColor Yellow
+          try {
+            Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0 -ErrorAction Stop
+            Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 0 -ErrorAction Stop
+            Write-Host "  [OK] RDP fully enabled" -ForegroundColor Green
+          } catch {
+            Write-Host "  [ERROR] RDP setup failed: $_" -ForegroundColor Red
+          }
+
+      # ============================================================
+      # STEP 4: Setup Administrator
+      # ============================================================
+      - name: "Setup Administrator Account"
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "  --- Setting up Administrator ---" -ForegroundColor Yellow
+
+          if ([string]::IsNullOrEmpty($env:RDP_PASSWORD)) {
+            Write-Host "  [ERROR] RDP_PASSWORD empty!" -ForegroundColor Red
+            exit 1
+          }
+
+          try {
+            $Password = ConvertTo-SecureString $env:RDP_PASSWORD -AsPlainText -Force
+            try {
+              Enable-LocalUser -Name "Administrator" -ErrorAction Stop
+              Set-LocalUser -Name "Administrator" -Password $Password -PasswordNeverExpires $true
+              Write-Host "  [OK] Built-in Administrator enabled" -ForegroundColor Green
+            } catch {
+              New-LocalUser -Name "Administrator" -Password $Password -PasswordNeverExpires -ErrorAction SilentlyContinue
+              Write-Host "  [OK] User Administrator created" -ForegroundColor Green
+            }
+            Add-LocalGroupMember -Group "Administrators" -Member "Administrator" -ErrorAction SilentlyContinue
+            net user runneradmin $env:RDP_PASSWORD 2>$null | Out-Null
+            Write-Host "  [OK] Administrator ready" -ForegroundColor Green
+          } catch {
+            Write-Host "  [ERROR] $_" -ForegroundColor Red
+          }
+
+      # ============================================================
+      # STEP 5: Restore Backup from B2
+      # ============================================================
+      - name: "Restore Backup from B2"
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "  --- Restore from Backblaze B2 ---" -ForegroundColor Magenta
+
+          $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
+          $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
+          $env:AWS_DEFAULT_REGION    = $env:B2_REGION
+          $aws = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
+
+          if (-not (Test-Path $aws)) {
+            Write-Host "  [SKIP] AWS CLI not installed" -ForegroundColor Yellow
+            exit 0
+          }
+
+          Write-Host "  Checking for existing backup..." -ForegroundColor Yellow
+          try {
+            $listResult = & $aws s3 ls "s3://$env:B2_BUCKET/" --endpoint-url "https://$env:B2_ENDPOINT" 2>&1
+            Write-Host $listResult -ForegroundColor Gray
+          } catch {
+            Write-Host "  [ERROR] B2 listing failed: $_" -ForegroundColor Red
+            exit 0
+          }
+
+          if ("$listResult" -match "userdata.zip") {
+            Write-Host "  [OK] Backup found" -ForegroundColor Green
+            $backupZip = "C:\userdata.zip"
+            $downloaded = $false
+
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              try {
+                Write-Host "  Download attempt $attempt/3..." -ForegroundColor Cyan
+                & $aws s3 cp "s3://$env:B2_BUCKET/userdata.zip" $backupZip `
+                  --endpoint-url "https://$env:B2_ENDPOINT" --no-progress
+                if ((Test-Path $backupZip) -and ((Get-Item $backupZip).Length -gt 0)) {
+                  $downloaded = $true
+                  break
+                }
+              } catch {
+                Write-Host "  [WARN] Attempt $attempt failed: $_" -ForegroundColor Red
+                Start-Sleep -Seconds 10
+              }
+            }
+
+            if ($downloaded) {
+              $sizeMB = [math]::Round((Get-Item $backupZip).Length / 1MB, 2)
+              Write-Host "  [OK] Downloaded: $sizeMB MB" -ForegroundColor Green
+              Write-Host "  Extracting..." -ForegroundColor Yellow
+              Expand-Archive -Path $backupZip -DestinationPath "C:\" -Force -ErrorAction SilentlyContinue
+              Write-Host "  [OK] Restore complete" -ForegroundColor Green
+              Remove-Item $backupZip -Force -ErrorAction SilentlyContinue
+            }
+          } else {
+            Write-Host "  [INFO] No backup on B2 (first run)" -ForegroundColor Yellow
+          }
+
+      # ============================================================
+      # STEP 6: Install & Connect Tailscale
+      # ============================================================
+      - name: "Install & Connect Tailscale"
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "  --- Installing Tailscale ---" -ForegroundColor Cyan
+
+          if ([string]::IsNullOrEmpty($env:TAILSCALE_AUTHKEY)) {
+            Write-Host "  [ERROR] TAILSCALE_AUTHKEY missing!" -ForegroundColor Red
+            exit 1
+          }
+
+          Write-Host "  [1/3] Downloading installer..." -ForegroundColor Yellow
+          try {
+            Invoke-WebRequest "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" -OutFile "C:\tailscale.msi" -ErrorAction Stop
+            Write-Host "  [OK] Downloaded" -ForegroundColor Green
+          } catch {
+            Write-Host "  [ERROR] Download failed: $_" -ForegroundColor Red
+            exit 1
+          }
+
+          Write-Host "  [2/3] Installing silently..." -ForegroundColor Yellow
+          Start-Process msiexec -ArgumentList "/i C:\tailscale.msi /quiet /norestart" -Wait
+          Start-Sleep -Seconds 10
+
+          $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
+          if (-not (Test-Path $tsExe)) {
+            Write-Host "  [ERROR] Tailscale not installed!" -ForegroundColor Red
+            exit 1
+          }
+          Write-Host "  [OK] Installed" -ForegroundColor Green
+
+          Write-Host "  [3/3] Connecting..." -ForegroundColor Yellow
+          & $tsExe up --authkey="$env:TAILSCALE_AUTHKEY" --hostname="github-rdp-server-$(Get-Random)" --accept-routes
+          Start-Sleep -Seconds 15
+
+          Write-Host ""
+          Write-Host "  --- Tailscale Status ---" -ForegroundColor Cyan
+          $ts_ip = & $tsExe ip -4 2>&1
+          $ts_status = & $tsExe status 2>&1
+
+          Write-Host "  IP     : $ts_ip" -ForegroundColor White
+          Write-Host "  Status :" -ForegroundColor White
+          Write-Host $ts_status -ForegroundColor Gray
+
+          Write-Host ""
+          Write-Host "  ======================================================" -ForegroundColor Green
+          Write-Host "           RDP SERVER IS READY!" -ForegroundColor Green
+          Write-Host "  ======================================================" -ForegroundColor Green
+          Write-Host ""
+          Write-Host "    Tailscale IP : $ts_ip" -ForegroundColor White
+          Write-Host "    Username     : Administrator" -ForegroundColor White
+          Write-Host "    Password     : (see your yml file)" -ForegroundColor White
+          Write-Host ""
+
+      # ============================================================
+      # STEP 7: Keep Alive (5 hours)
+      # ============================================================
+      - name: "Keep Server Alive (5 hours)"
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "  --- Keep Alive Started ---" -ForegroundColor Cyan
+          Write-Host "  Running for 300 minutes (~5h)" -ForegroundColor Cyan
+          Write-Host ""
+
+          $totalMinutes = 300
+          $startTime = Get-Date
+
+          for ($i = 1; $i -le $totalMinutes; $i++) {
+            Start-Sleep -Seconds 60
+            $elapsed = (Get-Date) - $startTime
+            $remaining = $totalMinutes - $i
+            $hours = [math]::Floor($remaining / 60)
+            $mins  = $remaining % 60
+            Write-Host "  [$i/$totalMinutes] Elapsed: $([math]::Floor($elapsed.TotalMinutes)) min | Remaining: ${hours}h ${mins}m" -ForegroundColor Gray
+          }
+          Write-Host "  [OK] Keep alive finished" -ForegroundColor Green
+
+      # ============================================================
+      # STEP 8: Create Backup Zip
+      # ============================================================
+      - name: "Create Backup Zip"
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "  --- Creating Backup ---" -ForegroundColor Magenta
+
+          $userDir = "C:\Users\Administrator"
+          $stage   = "C:\backup-stage"
+          $zipPath = "C:\userdata.zip"
+
+          if (Test-Path $stage) { Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue }
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+
+          function Copy-Folder {
+            param($Source, $DestName, $Exclude = @())
+            if (Test-Path $Source) {
+              $dest = Join-Path $stage $DestName
+              New-Item -ItemType Directory -Path $dest -Force | Out-Null
+              if ($Exclude.Count -gt 0) {
+                robocopy $Source $dest /E /XD @Exclude /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
+              } else {
+                robocopy $Source $dest /E /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
+              }
+              $size = (Get-ChildItem $dest -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+              Write-Host "    [OK] $DestName : $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
+            } else {
+              Write-Host "    [SKIP] $Source not found" -ForegroundColor Gray
+            }
+          }
+
+          Copy-Folder "$userDir\Desktop"   "Desktop"
+          Copy-Folder "$userDir\Documents" "Documents"
+          Copy-Folder "$userDir\Downloads" "Downloads"
+          Copy-Folder "$userDir\Pictures"  "Pictures"
+          Copy-Folder "$userDir\Videos"    "Videos"
+
+          # Chrome
+          $chromeSrc = "$userDir\AppData\Local\Google\Chrome\User Data\Default"
+          $chromeDst = "$stage\AppData\Local\Google\Chrome\User Data\Default"
+          if (Test-Path $chromeSrc) {
+            New-Item -ItemType Directory -Path $chromeDst -Force | Out-Null
+            robocopy $chromeSrc $chromeDst /E `
+              /XD "Cache" "Code Cache" "GPUCache" "Service Worker" "Application Cache" "Media Cache" "GrShaderCache" "ShaderCache" `
+              /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
+            $size = (Get-ChildItem $chromeDst -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+            Write-Host "    [OK] Chrome: $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
+          }
+
+          # Telegram
+          $tgSrc = "$userDir\AppData\Roaming\Telegram Desktop\tdata"
+          $tgDst = "$stage\AppData\Roaming\Telegram Desktop\tdata"
+          if (Test-Path $tgSrc) {
+            New-Item -ItemType Directory -Path $tgDst -Force | Out-Null
+            robocopy $tgSrc $tgDst /E /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
+            $size = (Get-ChildItem $tgDst -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+            Write-Host "    [OK] Telegram: $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
+          }
+
+          Write-Host ""
+          Write-Host "  Compressing..." -ForegroundColor Yellow
+          Compress-Archive -Path "$stage\*" -DestinationPath $zipPath -Force -CompressionLevel Optimal -ErrorAction SilentlyContinue
+
+          if (Test-Path $zipPath) {
+            $zipGB = [math]::Round((Get-Item $zipPath).Length / 1GB, 3)
+            Write-Host "  [OK] Backup: $zipGB GB" -ForegroundColor Green
+
+            if ($zipGB -gt 10) {
+              Write-Host "  [WARN] >10GB, removing Downloads..." -ForegroundColor Red
+              Remove-Item "$stage\Downloads" -Recurse -Force -ErrorAction SilentlyContinue
+              Remove-Item $zipPath -Force
+              Compress-Archive -Path "$stage\*" -DestinationPath $zipPath -Force -CompressionLevel Optimal
+              Write-Host "  [OK] New size: $([math]::Round((Get-Item $zipPath).Length/1GB,3)) GB" -ForegroundColor Green
+            }
+          }
+
+          Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+
+      # ============================================================
+      # STEP 9: Upload to B2
+      # ============================================================
+      - name: "Upload Backup to B2"
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "  --- Uploading to B2 ---" -ForegroundColor Magenta
+
+          $zipPath = "C:\userdata.zip"
+          if (-not (Test-Path $zipPath)) {
+            Write-Host "  [SKIP] No backup file" -ForegroundColor Yellow
+            exit 0
+          }
+
+          $sizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
+          Write-Host "  Backup size: $sizeMB MB" -ForegroundColor Cyan
+
+          $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
+          $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
+          $env:AWS_DEFAULT_REGION    = $env:B2_REGION
+          $aws = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
+
+          if (-not (Test-Path $aws)) {
+            Write-Host "  [SKIP] AWS CLI missing" -ForegroundColor Yellow
+            exit 0
+          }
+
+          $uploaded = $false
+          for ($attempt = 1; $attempt -le 5; $attempt++) {
+            Write-Host "  Attempt $attempt/5..." -ForegroundColor Cyan
+            & $aws s3 cp $zipPath "s3://$env:B2_BUCKET/userdata.zip" `
+              --endpoint-url "https://$env:B2_ENDPOINT" --no-progress
+            if ($LASTEXITCODE -eq 0) {
+              $uploaded = $true
+              break
+            }
+            Start-Sleep -Seconds 15
+          }
+
+          if ($uploaded) {
+            Write-Host "  [OK] Uploaded to B2" -ForegroundColor Green
+          } else {
+            Write-Host "  [ERROR] Upload failed after 5 attempts" -ForegroundColor Red
+          }
+
+      # ============================================================
+      # STEP 10: Summary
+      # ============================================================
+      - name: "Final Summary"
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "  ======================================================" -ForegroundColor Cyan
+          Write-Host "                    RUN SUMMARY" -ForegroundColor Cyan
+          Write-Host "  ======================================================" -ForegroundColor Cyan
+          Write-Host ""
+          Write-Host "  End time : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
+          Write-Host "  Status   : ${{ job.status }}" -ForegroundColor Gray
+          Write-Host ""
