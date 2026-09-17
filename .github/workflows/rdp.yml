@@ -3,9 +3,6 @@ name: Windows
 on:
   workflow_dispatch:
 
-# ============================================================
-# ⚙️  تنظیمات - اینجا ویرایش کن
-# ============================================================
 env:
   RDP_PASSWORD: "Mehdi@13579@#$"
   TAILSCALE_AUTHKEY: "tskey-auth-kM5gcJDL9B21CNTRL-dBrSevCy22avgAJ5j2kS2aviVpoQNKrF"
@@ -22,35 +19,35 @@ jobs:
 
     steps:
       # ============================================================
-      # STEP 0: Banner
+      # STEP 0: Welcome
       # ============================================================
-      - name: "🚀 Welcome"
+      - name: "Welcome"
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-          Write-Host "  ║         GITHUB WINDOWS RDP - v5.0                    ║" -ForegroundColor Cyan
-          Write-Host "  ║         با اعتبارسنجی کامل پیش از اجرا              ║" -ForegroundColor Cyan
-          Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+          Write-Host "  ======================================================" -ForegroundColor Cyan
+          Write-Host "         GITHUB WINDOWS RDP - v6.0" -ForegroundColor Cyan
+          Write-Host "         Full Pre-flight Validation" -ForegroundColor Cyan
+          Write-Host "  ======================================================" -ForegroundColor Cyan
           Write-Host ""
-          Write-Host "  🕐 Start time : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
-          Write-Host "  🖥️  Hostname   : $env:COMPUTERNAME" -ForegroundColor Gray
-          Write-Host "  👤 Runner     : $env:USERNAME" -ForegroundColor Gray
+          Write-Host "  Start time : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
+          Write-Host "  Hostname   : $env:COMPUTERNAME" -ForegroundColor Gray
+          Write-Host "  Runner     : $env:USERNAME" -ForegroundColor Gray
           Write-Host ""
 
-      - name: "📥 Checkout Repository"
+      - name: "Checkout Repository"
         uses: actions/checkout@v4
 
       # ============================================================
-      # STEP 1: PRE-FLIGHT - بررسی env variables
+      # STEP 1: Validate environment variables
       # ============================================================
-      - name: "🔍 [1/4] بررسی متغیرهای محیطی"
+      - name: "[1/4] Validate Environment Variables"
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ┌──────────────────────────────────────────────────────┐" -ForegroundColor Yellow
-          Write-Host "  │  بررسی متغیرهای محیطی                              │" -ForegroundColor Yellow
-          Write-Host "  └──────────────────────────────────────────────────────┘" -ForegroundColor Yellow
+          Write-Host "  ------------------------------------------------------" -ForegroundColor Yellow
+          Write-Host "  Validating environment variables" -ForegroundColor Yellow
+          Write-Host "  ------------------------------------------------------" -ForegroundColor Yellow
           Write-Host ""
 
           $required = @(
@@ -72,71 +69,68 @@ jobs:
             $min  = $item.MinLen
 
             if ([string]::IsNullOrWhiteSpace($val)) {
-              Write-Host "  ❌ $name : خالی است" -ForegroundColor Red
+              Write-Host "  [MISSING] $name is empty" -ForegroundColor Red
               $missing += $name
             }
             elseif ($val.Length -lt $min) {
-              Write-Host "  ⚠️  $name : خیلی کوتاه (طول=$($val.Length), حداقل=$min)" -ForegroundColor Red
+              Write-Host "  [INVALID] $name too short (len=$($val.Length), min=$min)" -ForegroundColor Red
               $tooShort += $name
             }
             else {
-              Write-Host "  ✅ $name : OK (طول=$($val.Length))" -ForegroundColor Green
+              Write-Host "  [OK] $name (len=$($val.Length))" -ForegroundColor Green
             }
           }
 
           Write-Host ""
 
           if ($missing.Count -gt 0) {
-            Write-Host "  ⛔ متغیرهای خالی: $($missing -join ', ')" -ForegroundColor Red
-            Write-Host ""
-            Write-Host "  راه‌حل: مقادیر را در بخش env فایل yml پر کن." -ForegroundColor Yellow
+            Write-Host "  FAILED: Missing variables: $($missing -join ', ')" -ForegroundColor Red
+            Write-Host "  Fix: Fill values in the env section of the yml file." -ForegroundColor Yellow
             exit 1
           }
 
           if ($tooShort.Count -gt 0) {
-            Write-Host "  ⛔ متغیرهای نامعتبر: $($tooShort -join ', ')" -ForegroundColor Red
+            Write-Host "  FAILED: Invalid variables: $($tooShort -join ', ')" -ForegroundColor Red
             exit 1
           }
 
-          # بررسی فرمت‌های خاص
-          Write-Host "  ── بررسی فرمت‌ها ──" -ForegroundColor Yellow
+          Write-Host "  -- Format checks --" -ForegroundColor Yellow
 
           if ($env:TAILSCALE_AUTHKEY -notmatch '^tskey-auth-') {
-            Write-Host "  ❌ TAILSCALE_AUTHKEY باید با 'tskey-auth-' شروع شود" -ForegroundColor Red
+            Write-Host "  [FAIL] TAILSCALE_AUTHKEY must start with 'tskey-auth-'" -ForegroundColor Red
             exit 1
           }
-          Write-Host "  ✅ فرمت Tailscale AuthKey صحیح است" -ForegroundColor Green
+          Write-Host "  [OK] Tailscale AuthKey format is valid" -ForegroundColor Green
 
           if ($env:B2_KEY_ID -notmatch '^[0-9a-fA-F]+$') {
-            Write-Host "  ⚠️  B2_KEY_ID معمولاً فقط hex است - بررسی کن" -ForegroundColor Yellow
+            Write-Host "  [WARN] B2_KEY_ID is usually hex only" -ForegroundColor Yellow
           } else {
-            Write-Host "  ✅ فرمت B2_KEY_ID صحیح است" -ForegroundColor Green
+            Write-Host "  [OK] B2_KEY_ID format is valid" -ForegroundColor Green
           }
 
           if ($env:B2_ENDPOINT -notmatch '^s3\..+\.backblazeb2\.com$') {
-            Write-Host "  ⚠️  B2_ENDPOINT فرمت معمول را ندارد" -ForegroundColor Yellow
+            Write-Host "  [WARN] B2_ENDPOINT format is unusual" -ForegroundColor Yellow
           } else {
-            Write-Host "  ✅ فرمت B2_ENDPOINT صحیح است" -ForegroundColor Green
+            Write-Host "  [OK] B2_ENDPOINT format is valid" -ForegroundColor Green
           }
 
           Write-Host ""
-          Write-Host "  ✅ [1/4] همه متغیرها معتبر هستند" -ForegroundColor Green
+          Write-Host "  [1/4] All variables are valid" -ForegroundColor Green
           Write-Host ""
 
       # ============================================================
-      # STEP 2: PRE-FLIGHT - تست اتصال Backblaze B2
+      # STEP 2: Backblaze B2 connectivity test
       # ============================================================
-      - name: "🔍 [2/4] تست اتصال Backblaze B2"
+      - name: "[2/4] Test Backblaze B2 Connection"
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ┌──────────────────────────────────────────────────────┐" -ForegroundColor Yellow
-          Write-Host "  │  تست اتصال و احراز هویت Backblaze B2                │" -ForegroundColor Yellow
-          Write-Host "  └──────────────────────────────────────────────────────┘" -ForegroundColor Yellow
+          Write-Host "  ------------------------------------------------------" -ForegroundColor Yellow
+          Write-Host "  Testing Backblaze B2 connection" -ForegroundColor Yellow
+          Write-Host "  ------------------------------------------------------" -ForegroundColor Yellow
           Write-Host ""
 
-          # نصب AWS CLI
-          Write-Host "  📦 نصب AWS CLI..." -ForegroundColor Cyan
+          Write-Host "  Installing AWS CLI..." -ForegroundColor Cyan
           $installer = "$env:TEMP\AWSCLIV2.msi"
           try {
             if (-not (Test-Path "C:\Program Files\Amazon\AWSCLIV2\aws.exe")) {
@@ -146,12 +140,12 @@ jobs:
             }
             $aws = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
             if (-not (Test-Path $aws)) {
-              throw "AWS CLI نصب نشد"
+              throw "AWS CLI installation failed"
             }
             $ver = & $aws --version 2>&1
-            Write-Host "  ✅ AWS CLI آماده: $ver" -ForegroundColor Green
+            Write-Host "  [OK] AWS CLI: $ver" -ForegroundColor Green
           } catch {
-            Write-Host "  ❌ نصب AWS CLI ناموفق: $_" -ForegroundColor Red
+            Write-Host "  [FAIL] AWS CLI install: $_" -ForegroundColor Red
             exit 1
           }
 
@@ -162,151 +156,138 @@ jobs:
 
           $endpoint = "https://$env:B2_ENDPOINT"
 
-          # تست ۱: دسترسی به خود باکِت
-          Write-Host "  🔐 تست دسترسی به باکِت '$env:B2_BUCKET'..." -ForegroundColor Cyan
+          Write-Host "  Testing bucket access: '$env:B2_BUCKET'..." -ForegroundColor Cyan
           $head = & $aws s3api head-bucket --bucket $env:B2_BUCKET --endpoint-url $endpoint 2>&1
           $headExit = $LASTEXITCODE
 
           if ($headExit -ne 0) {
-            Write-Host "  ❌ دسترسی به باکِت ناموفق!" -ForegroundColor Red
+            Write-Host "  [FAIL] Cannot access bucket!" -ForegroundColor Red
             Write-Host ""
-            Write-Host "  جزئیات خطا:" -ForegroundColor Yellow
+            Write-Host "  Error details:" -ForegroundColor Yellow
             Write-Host "  $head" -ForegroundColor Gray
             Write-Host ""
-            Write-Host "  دلایل محتمل:" -ForegroundColor Yellow
-            Write-Host "    • نام باکِت اشتباه است (به حروف بزرگ/کوچک حساس است)" -ForegroundColor Gray
-            Write-Host "    • کلید B2 به این باکِت دسترسی ندارد" -ForegroundColor Gray
-            Write-Host "    • B2_KEY_ID یا B2_APP_KEY اشتباه است" -ForegroundColor Gray
-            Write-Host "    • کلید revoke شده یا منقضی شده" -ForegroundColor Gray
-            Write-Host "    • B2_ENDPOINT اشتباه است" -ForegroundColor Gray
-            Write-Host ""
-            Write-Host "  💡 نکته: کلید B2 باید حداقل دسترسی read+write به این باکِت داشته باشد." -ForegroundColor Yellow
+            Write-Host "  Possible causes:" -ForegroundColor Yellow
+            Write-Host "    - Bucket name is wrong (case-sensitive)" -ForegroundColor Gray
+            Write-Host "    - B2 key has no access to this bucket" -ForegroundColor Gray
+            Write-Host "    - B2_KEY_ID or B2_APP_KEY is wrong" -ForegroundColor Gray
+            Write-Host "    - Key is revoked or expired" -ForegroundColor Gray
+            Write-Host "    - B2_ENDPOINT is wrong" -ForegroundColor Gray
             exit 1
           }
-          Write-Host "  ✅ دسترسی به باکِت OK" -ForegroundColor Green
+          Write-Host "  [OK] Bucket access works" -ForegroundColor Green
 
-          # تست ۲: دسترسی نوشتن
           Write-Host ""
-          Write-Host "  📝 تست دسترسی نوشتن..." -ForegroundColor Cyan
+          Write-Host "  Testing write access..." -ForegroundColor Cyan
           $testFile = "$env:TEMP\b2-test-$(Get-Random).txt"
           "connectivity test" | Out-File -FilePath $testFile -Encoding utf8
           $testKey = "_connectivity-test.txt"
 
           $put = & $aws s3 cp $testFile "s3://$env:B2_BUCKET/$testKey" --endpoint-url $endpoint --no-progress 2>&1
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "  ❌ دسترسی نوشتن ندارد!" -ForegroundColor Red
-            Write-Host ""
-            Write-Host "  جزئیات: $put" -ForegroundColor Gray
-            Write-Host ""
-            Write-Host "  💡 کلید B2 باید دسترسی writeFiles داشته باشد." -ForegroundColor Yellow
+            Write-Host "  [FAIL] No write access!" -ForegroundColor Red
+            Write-Host "  Details: $put" -ForegroundColor Gray
             Remove-Item $testFile -Force -ErrorAction SilentlyContinue
             exit 1
           }
-          Write-Host "  ✅ دسترسی نوشتن OK" -ForegroundColor Green
+          Write-Host "  [OK] Write access works" -ForegroundColor Green
 
-          Write-Host "  🗑️  پاکسازی فایل تست..." -ForegroundColor Cyan
+          Write-Host "  Cleaning up test file..." -ForegroundColor Cyan
           & $aws s3 rm "s3://$env:B2_BUCKET/$testKey" --endpoint-url $endpoint 2>&1 | Out-Null
           Remove-Item $testFile -Force -ErrorAction SilentlyContinue
 
-          # تست ۳: بررسی وجود بکاپ قبلی
           Write-Host ""
-          Write-Host "  📂 بررسی وجود بکاپ قبلی..." -ForegroundColor Cyan
+          Write-Host "  Checking for existing backup..." -ForegroundColor Cyan
           $obj = & $aws s3api head-object --bucket $env:B2_BUCKET --key "userdata.zip" --endpoint-url $endpoint 2>&1
           if ($LASTEXITCODE -eq 0) {
-            Write-Host "  ✅ بکاپ قبلی پیدا شد" -ForegroundColor Green
+            Write-Host "  [OK] Previous backup found" -ForegroundColor Green
           } else {
-            Write-Host "  ℹ️  بکاپ قبلی وجود ندارد (اولین اجرا)" -ForegroundColor Yellow
+            Write-Host "  [INFO] No previous backup (first run)" -ForegroundColor Yellow
           }
 
           Write-Host ""
-          Write-Host "  ✅ [2/4] Backblaze B2 کاملاً آماده است" -ForegroundColor Green
+          Write-Host "  [2/4] Backblaze B2 is ready" -ForegroundColor Green
           Write-Host ""
 
           $global:LASTEXITCODE = 0
           exit 0
 
       # ============================================================
-      # STEP 3: PRE-FLIGHT - تست اتصال Tailscale
+      # STEP 3: Tailscale connectivity test
       # ============================================================
-      - name: "🔍 [3/4] تست اتصال Tailscale"
+      - name: "[3/4] Test Tailscale Connection"
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ┌──────────────────────────────────────────────────────┐" -ForegroundColor Yellow
-          Write-Host "  │  تست اتصال و احراز هویت Tailscale                   │" -ForegroundColor Yellow
-          Write-Host "  └──────────────────────────────────────────────────────┘" -ForegroundColor Yellow
+          Write-Host "  ------------------------------------------------------" -ForegroundColor Yellow
+          Write-Host "  Testing Tailscale connection" -ForegroundColor Yellow
+          Write-Host "  ------------------------------------------------------" -ForegroundColor Yellow
           Write-Host ""
 
-          # بررسی دسترسی به سرور Tailscale با TCP (نه HTTP - چون HEAD رو بلاک می‌کنه)
-          Write-Host "  🌐 بررسی دسترسی به Tailscale..." -ForegroundColor Cyan
+          Write-Host "  Checking Tailscale reachability..." -ForegroundColor Cyan
           try {
             $tcp = New-Object System.Net.Sockets.TcpClient
             $connect = $tcp.BeginConnect("login.tailscale.com", 443, $null, $null)
             $success = $connect.AsyncWaitHandle.WaitOne(10000, $false)
             if (-not $success) {
-              throw "اتصال TCP timeout شد"
+              throw "TCP connect timed out"
             }
             $tcp.EndConnect($connect)
             $tcp.Close()
-            Write-Host "  ✅ Tailscale در دسترس است (TCP:443)" -ForegroundColor Green
+            Write-Host "  [OK] Tailscale is reachable (TCP:443)" -ForegroundColor Green
           } catch {
-            Write-Host "  ❌ اتصال به Tailscale ناموفق: $_" -ForegroundColor Red
+            Write-Host "  [FAIL] Tailscale unreachable: $_" -ForegroundColor Red
             exit 1
           }
 
-          # دانلود نصب‌کننده
           Write-Host ""
-          Write-Host "  📦 دانلود نصب‌کننده Tailscale..." -ForegroundColor Cyan
+          Write-Host "  Downloading Tailscale installer..." -ForegroundColor Cyan
           $msiPath = "C:\tailscale.msi"
           try {
             Invoke-WebRequest "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" `
               -OutFile $msiPath -UseBasicParsing -ErrorAction Stop
             $sizeMB = [math]::Round((Get-Item $msiPath).Length / 1MB, 2)
-            Write-Host "  ✅ دانلود شد: $sizeMB MB" -ForegroundColor Green
+            Write-Host "  [OK] Downloaded: $sizeMB MB" -ForegroundColor Green
           } catch {
-            Write-Host "  ❌ دانلود ناموفق: $_" -ForegroundColor Red
+            Write-Host "  [FAIL] Download failed: $_" -ForegroundColor Red
             exit 1
           }
 
-          # نصب
           Write-Host ""
-          Write-Host "  🔧 نصب Tailscale..." -ForegroundColor Cyan
+          Write-Host "  Installing Tailscale..." -ForegroundColor Cyan
           Start-Process msiexec -ArgumentList "/i $msiPath /quiet /norestart" -Wait
           Start-Sleep -Seconds 15
 
           $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
           if (-not (Test-Path $tsExe)) {
-            Write-Host "  ❌ Tailscale نصب نشد!" -ForegroundColor Red
+            Write-Host "  [FAIL] Tailscale not installed!" -ForegroundColor Red
             exit 1
           }
-          Write-Host "  ✅ Tailscale نصب شد" -ForegroundColor Green
+          Write-Host "  [OK] Tailscale installed" -ForegroundColor Green
 
-          # اتصال با AuthKey
           Write-Host ""
-          Write-Host "  🔐 تست اعتبار AuthKey و اتصال..." -ForegroundColor Cyan
+          Write-Host "  Connecting with AuthKey..." -ForegroundColor Cyan
           $hostname = "github-rdp-$(Get-Random -Maximum 9999)"
           $connectOutput = & $tsExe up --authkey="$env:TAILSCALE_AUTHKEY" --hostname=$hostname --accept-routes 2>&1
           $connectExit = $LASTEXITCODE
 
           if ($connectExit -ne 0) {
-            Write-Host "  ❌ اتصال Tailscale ناموفق!" -ForegroundColor Red
+            Write-Host "  [FAIL] Tailscale connection failed!" -ForegroundColor Red
             Write-Host ""
-            Write-Host "  خروجی:" -ForegroundColor Yellow
+            Write-Host "  Output:" -ForegroundColor Yellow
             Write-Host "  $connectOutput" -ForegroundColor Gray
             Write-Host ""
-            Write-Host "  دلایل محتمل:" -ForegroundColor Yellow
-            Write-Host "    • AuthKey نامعتبر یا revoke شده" -ForegroundColor Gray
-            Write-Host "    • AuthKey منقضی شده" -ForegroundColor Gray
-            Write-Host "    • AuthKey به device limit رسیده" -ForegroundColor Gray
+            Write-Host "  Possible causes:" -ForegroundColor Yellow
+            Write-Host "    - AuthKey invalid or revoked" -ForegroundColor Gray
+            Write-Host "    - AuthKey expired" -ForegroundColor Gray
+            Write-Host "    - AuthKey reached device limit" -ForegroundColor Gray
             exit 1
           }
 
           Start-Sleep -Seconds 15
 
-          # تأیید اتصال و IP
           $tsIP = & $tsExe ip -4 2>&1
           if ([string]::IsNullOrWhiteSpace($tsIP) -or $tsIP -match 'error') {
-            Write-Host "  ❌ Tailscale IP دریافت نشد" -ForegroundColor Red
+            Write-Host "  [FAIL] Tailscale IP not received" -ForegroundColor Red
             Write-Host "  $tsIP" -ForegroundColor Gray
             exit 1
           }
@@ -314,16 +295,16 @@ jobs:
           $tsStatus = & $tsExe status 2>&1
 
           Write-Host ""
-          Write-Host "  ✅ [3/4] Tailscale متصل شد" -ForegroundColor Green
+          Write-Host "  [3/4] Tailscale connected" -ForegroundColor Green
           Write-Host ""
-          Write-Host "  ┌──────────────────────────────────────────────────────┐" -ForegroundColor Green
-          Write-Host "  │              اطلاعات اتصال Tailscale                 │" -ForegroundColor Green
-          Write-Host "  ├──────────────────────────────────────────────────────┤" -ForegroundColor Green
-          Write-Host "  │  IP       : $tsIP" -ForegroundColor White
-          Write-Host "  │  Hostname : $hostname" -ForegroundColor White
-          Write-Host "  └──────────────────────────────────────────────────────┘" -ForegroundColor Green
+          Write-Host "  ------------------------------------------------------" -ForegroundColor Green
+          Write-Host "                Tailscale Connection Info" -ForegroundColor Green
+          Write-Host "  ------------------------------------------------------" -ForegroundColor Green
+          Write-Host "  IP       : $tsIP" -ForegroundColor White
+          Write-Host "  Hostname : $hostname" -ForegroundColor White
+          Write-Host "  ------------------------------------------------------" -ForegroundColor Green
           Write-Host ""
-          Write-Host "  وضعیت کامل:" -ForegroundColor Cyan
+          Write-Host "  Full status:" -ForegroundColor Cyan
           Write-Host $tsStatus -ForegroundColor Gray
           Write-Host ""
 
@@ -334,83 +315,83 @@ jobs:
           exit 0
 
       # ============================================================
-      # STEP 4: PRE-FLIGHT - خلاصه بررسی‌ها
+      # STEP 4: Pre-flight summary
       # ============================================================
-      - name: "🔍 [4/4] خلاصه بررسی‌های اولیه"
+      - name: "[4/4] Pre-flight Summary"
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor Green
-          Write-Host "  ║          ✅ همه بررسی‌ها موفق بودند                  ║" -ForegroundColor Green
-          Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Green
+          Write-Host "  ======================================================" -ForegroundColor Green
+          Write-Host "           All pre-flight checks passed" -ForegroundColor Green
+          Write-Host "  ======================================================" -ForegroundColor Green
           Write-Host ""
-          Write-Host "  ✅ [1/4] متغیرهای محیطی معتبر" -ForegroundColor Green
-          Write-Host "  ✅ [2/4] Backblaze B2 متصل و آماده" -ForegroundColor Green
-          Write-Host "  ✅ [3/4] Tailscale متصل و آماده" -ForegroundColor Green
-          Write-Host "  ✅ [4/4] شروع فرآیند اصلی..." -ForegroundColor Green
+          Write-Host "  [1/4] Environment variables valid" -ForegroundColor Green
+          Write-Host "  [2/4] Backblaze B2 connected" -ForegroundColor Green
+          Write-Host "  [3/4] Tailscale connected" -ForegroundColor Green
+          Write-Host "  [4/4] Starting main process..." -ForegroundColor Green
           Write-Host ""
-          Write-Host "  🕐 زمان: $(Get-Date -Format 'HH:mm:ss')" -ForegroundColor Gray
+          Write-Host "  Time: $(Get-Date -Format 'HH:mm:ss')" -ForegroundColor Gray
           Write-Host ""
 
       # ============================================================
       # STEP 5: Enable RDP
       # ============================================================
-      - name: "🖥️ فعال‌سازی RDP"
+      - name: "Enable RDP"
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ── فعال‌سازی Remote Desktop ──" -ForegroundColor Yellow
+          Write-Host "  -- Enabling Remote Desktop --" -ForegroundColor Yellow
           try {
             Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -ErrorAction Stop
-            Write-Host "  ✅ fDenyTSConnections = 0" -ForegroundColor Green
+            Write-Host "  [OK] fDenyTSConnections = 0" -ForegroundColor Green
             Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
-            Write-Host "  ✅ فایروال RDP فعال شد" -ForegroundColor Green
+            Write-Host "  [OK] RDP firewall rule enabled" -ForegroundColor Green
             Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -ErrorAction Stop
-            Write-Host "  ✅ NLA غیرفعال شد" -ForegroundColor Green
+            Write-Host "  [OK] NLA disabled" -ForegroundColor Green
             Write-Host ""
-            Write-Host "  ✅ RDP کاملاً فعال است" -ForegroundColor Green
+            Write-Host "  [OK] RDP fully enabled" -ForegroundColor Green
           } catch {
-            Write-Host "  ❌ خطا در RDP: $_" -ForegroundColor Red
+            Write-Host "  [FAIL] RDP setup error: $_" -ForegroundColor Red
             exit 1
           }
           Write-Host ""
 
       # ============================================================
-      # STEP 6: Setup Administrator
+      # STEP 6: Setup Administrator account
       # ============================================================
-      - name: "👤 تنظیم حساب Administrator"
+      - name: "Setup Administrator Account"
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ── تنظیم Administrator ──" -ForegroundColor Yellow
+          Write-Host "  -- Configuring Administrator --" -ForegroundColor Yellow
           try {
             $Password = ConvertTo-SecureString $env:RDP_PASSWORD -AsPlainText -Force
             try {
               Enable-LocalUser -Name "Administrator" -ErrorAction Stop
               Set-LocalUser -Name "Administrator" -Password $Password -PasswordNeverExpires $true
-              Write-Host "  ✅ Administrator فعال شد" -ForegroundColor Green
+              Write-Host "  [OK] Administrator enabled" -ForegroundColor Green
             } catch {
               New-LocalUser -Name "Administrator" -Password $Password -PasswordNeverExpires -ErrorAction SilentlyContinue
-              Write-Host "  ✅ Administrator ساخته شد" -ForegroundColor Green
+              Write-Host "  [OK] Administrator created" -ForegroundColor Green
             }
             Add-LocalGroupMember -Group "Administrators" -Member "Administrator" -ErrorAction SilentlyContinue
             net user runneradmin $env:RDP_PASSWORD 2>$null | Out-Null
-            Write-Host "  ✅ پسورد تنظیم شد" -ForegroundColor Green
+            Write-Host "  [OK] Password set" -ForegroundColor Green
           } catch {
-            Write-Host "  ❌ خطا: $_" -ForegroundColor Red
+            Write-Host "  [FAIL] Error: $_" -ForegroundColor Red
             exit 1
           }
           Write-Host ""
 
       # ============================================================
-      # STEP 7: Restore Backup
+      # STEP 7: Restore backup from B2
       # ============================================================
-      - name: "📥 بازیابی بکاپ از B2"
+      - name: "Restore Backup from B2"
         continue-on-error: true
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ── بازیابی بکاپ ──" -ForegroundColor Magenta
+          Write-Host "  -- Restoring backup --" -ForegroundColor Magenta
 
           $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
           $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
@@ -420,12 +401,12 @@ jobs:
 
           & $aws s3api head-object --bucket $env:B2_BUCKET --key "userdata.zip" --endpoint-url $endpoint 2>$null | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "  ℹ️  بکاپ قبلی وجود ندارد - اولین اجرا" -ForegroundColor Yellow
+            Write-Host "  [INFO] No previous backup - first run" -ForegroundColor Yellow
             $global:LASTEXITCODE = 0
             exit 0
           }
 
-          Write-Host "  📥 دانلود بکاپ..." -ForegroundColor Cyan
+          Write-Host "  Downloading backup..." -ForegroundColor Cyan
           $backupZip = "C:\userdata.zip"
           $downloaded = $false
 
@@ -437,20 +418,30 @@ jobs:
                 break
               }
             } catch {
-              Write-Host "  ⚠️  تلاش $attempt ناموفق" -ForegroundColor Yellow
+              Write-Host "  [WARN] Attempt $attempt failed" -ForegroundColor Yellow
               Start-Sleep -Seconds 10
             }
           }
 
           if ($downloaded) {
             $sizeMB = [math]::Round((Get-Item $backupZip).Length / 1MB, 2)
-            Write-Host "  ✅ دانلود شد: $sizeMB MB" -ForegroundColor Green
-            Write-Host "  📦 استخراج..." -ForegroundColor Cyan
+            Write-Host "  [OK] Downloaded: $sizeMB MB" -ForegroundColor Green
+            Write-Host "  Extracting..." -ForegroundColor Cyan
             Expand-Archive -Path $backupZip -DestinationPath "C:\" -Force -ErrorAction SilentlyContinue
-            Write-Host "  ✅ بازیابی کامل شد" -ForegroundColor Green
+            Write-Host "  [OK] Restore complete" -ForegroundColor Green
             Remove-Item $backupZip -Force -ErrorAction SilentlyContinue
+
+            $regFile = "C:\Users\Administrator\Documents\_rdp-config\desktop-icons.reg"
+            if (Test-Path $regFile) {
+              Write-Host "  Restoring desktop icon layout..." -ForegroundColor Cyan
+              reg import $regFile 2>&1 | Out-Null
+              if ($LASTEXITCODE -eq 0) {
+                Write-Host "  [OK] Desktop icon layout restored" -ForegroundColor Green
+              }
+              $global:LASTEXITCODE = 0
+            }
           } else {
-            Write-Host "  ❌ دانلود بکاپ ناموفق" -ForegroundColor Red
+            Write-Host "  [FAIL] Backup download failed" -ForegroundColor Red
           }
           Write-Host ""
 
@@ -458,42 +449,95 @@ jobs:
           exit 0
 
       # ============================================================
-      # STEP 8: نمایش اطلاعات اتصال
+      # STEP 8: Install Telegram Desktop
       # ============================================================
-      - name: "📢 اطلاعات اتصال"
+      - name: "Install Telegram Desktop"
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "  -- Installing Telegram Desktop --" -ForegroundColor Cyan
+
+          $tgPath = "C:\Users\Administrator\AppData\Roaming\Telegram Desktop\Telegram.exe"
+          if (Test-Path $tgPath) {
+            Write-Host "  [OK] Telegram already installed" -ForegroundColor Green
+            $global:LASTEXITCODE = 0
+            exit 0
+          }
+
+          Write-Host "  Downloading Telegram installer..." -ForegroundColor Cyan
+          $tgInstaller = "C:\telegram-setup.exe"
+          try {
+            Invoke-WebRequest -Uri "https://telegram.org/dl/desktop/win64" -OutFile $tgInstaller -UseBasicParsing -ErrorAction Stop
+            $sizeMB = [math]::Round((Get-Item $tgInstaller).Length / 1MB, 2)
+            Write-Host "  [OK] Downloaded: $sizeMB MB" -ForegroundColor Green
+          } catch {
+            Write-Host "  [FAIL] Download failed: $_" -ForegroundColor Red
+            $global:LASTEXITCODE = 0
+            exit 0
+          }
+
+          Write-Host "  Installing silently..." -ForegroundColor Cyan
+          try {
+            Start-Process $tgInstaller -ArgumentList "/VERYSILENT /NORESTART /SUPPRESSMSGBOXES /DIR=`"C:\Users\Administrator\AppData\Roaming\Telegram Desktop`"" -Wait
+            Start-Sleep -Seconds 10
+            Write-Host "  [OK] Telegram installed" -ForegroundColor Green
+          } catch {
+            Write-Host "  [WARN] Silent install may have failed: $_" -ForegroundColor Yellow
+          }
+
+          Remove-Item $tgInstaller -Force -ErrorAction SilentlyContinue
+
+          $desktopLnk = "C:\Users\Administrator\Desktop\Telegram.lnk"
+          if ((Test-Path $tgPath) -and (-not (Test-Path $desktopLnk))) {
+            $ws = New-Object -ComObject WScript.Shell
+            $sc = $ws.CreateShortcut($desktopLnk)
+            $sc.TargetPath = $tgPath
+            $sc.Save()
+            Write-Host "  [OK] Desktop shortcut created" -ForegroundColor Green
+          }
+
+          Write-Host ""
+          $global:LASTEXITCODE = 0
+          exit 0
+
+      # ============================================================
+      # STEP 9: Display connection info
+      # ============================================================
+      - name: "Connection Info"
         shell: pwsh
         run: |
           $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
           $tsIP = & $tsExe ip -4 2>&1
 
           Write-Host ""
-          Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor Green
-          Write-Host "  ║           🎉 سرور RDP آماده است!                    ║" -ForegroundColor Green
-          Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Green
+          Write-Host "  ======================================================" -ForegroundColor Green
+          Write-Host "                RDP SERVER IS READY" -ForegroundColor Green
+          Write-Host "  ======================================================" -ForegroundColor Green
           Write-Host ""
-          Write-Host "  ┌──────────────────────────────────────────────────────┐" -ForegroundColor Cyan
-          Write-Host "  │              اطلاعات اتصال RDP                       │" -ForegroundColor Cyan
-          Write-Host "  ├──────────────────────────────────────────────────────┤" -ForegroundColor Cyan
-          Write-Host "  │  🖥️  IP       : $tsIP" -ForegroundColor White
-          Write-Host "  │  👤 Username : Administrator" -ForegroundColor White
-          Write-Host "  │  🔑 Password : (در فایل yml)" -ForegroundColor White
-          Write-Host "  │  🔌 Port     : 3389" -ForegroundColor White
-          Write-Host "  └──────────────────────────────────────────────────────┘" -ForegroundColor Cyan
+          Write-Host "  ------------------------------------------------------" -ForegroundColor Cyan
+          Write-Host "                RDP Connection Info" -ForegroundColor Cyan
+          Write-Host "  ------------------------------------------------------" -ForegroundColor Cyan
+          Write-Host "  IP       : $tsIP" -ForegroundColor White
+          Write-Host "  Username : Administrator" -ForegroundColor White
+          Write-Host "  Password : (see yml file)" -ForegroundColor White
+          Write-Host "  Port     : 3389" -ForegroundColor White
+          Write-Host "  ------------------------------------------------------" -ForegroundColor Cyan
           Write-Host ""
 
           $global:LASTEXITCODE = 0
           exit 0
 
       # ============================================================
-      # STEP 9: Keep Alive (5 hours)
+      # STEP 10: Keep Alive (5 hours)
       # ============================================================
-      - name: "⏳ نگه‌داشتن سرور فعال (5 ساعت)"
+      - name: "Keep Server Alive (5 hours)"
         if: always()
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ── Keep Alive شروع شد ──" -ForegroundColor Cyan
-          Write-Host "  ⏱️  مدت: 300 دقیقه" -ForegroundColor Cyan
+          Write-Host "  -- Keep Alive started --" -ForegroundColor Cyan
+          Write-Host "  Duration: 300 minutes" -ForegroundColor Cyan
           Write-Host ""
 
           $totalMinutes = 300
@@ -509,28 +553,28 @@ jobs:
             if ($i % 5 -eq 0 -or $i -eq 1) {
               $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
               $tsIP = & $tsExe ip -4 2>&1
-              Write-Host "  [$i/$totalMinutes] ⏱️  گذشته: $([math]::Floor($elapsed.TotalMinutes))min | باقی: ${h}h ${m}m | IP: $tsIP" -ForegroundColor Gray
+              Write-Host "  [$i/$totalMinutes] elapsed: $([math]::Floor($elapsed.TotalMinutes))min | remaining: ${h}h ${m}m | IP: $tsIP" -ForegroundColor Gray
             } else {
-              Write-Host "  [$i/$totalMinutes] باقی‌مانده: ${h}h ${m}m" -ForegroundColor DarkGray
+              Write-Host "  [$i/$totalMinutes] remaining: ${h}h ${m}m" -ForegroundColor DarkGray
             }
           }
           Write-Host ""
-          Write-Host "  ✅ Keep Alive تمام شد" -ForegroundColor Green
+          Write-Host "  [OK] Keep Alive finished" -ForegroundColor Green
           Write-Host ""
 
           $global:LASTEXITCODE = 0
           exit 0
 
       # ============================================================
-      # STEP 10: Create Backup Zip
+      # STEP 11: Create backup zip
       # ============================================================
-      - name: "📦 ساخت فایل بکاپ"
+      - name: "Create Backup Zip"
         if: always()
         continue-on-error: true
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ── ساخت بکاپ ──" -ForegroundColor Magenta
+          Write-Host "  -- Creating backup --" -ForegroundColor Magenta
 
           $userDir = "C:\Users\Administrator"
           $stage   = "C:\backup-stage"
@@ -551,9 +595,9 @@ jobs:
                 robocopy $Source $dest /E /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
               }
               $size = (Get-ChildItem $dest -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-              Write-Host "    ✅ $DestName : $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
+              Write-Host "    [OK] $DestName : $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
             } else {
-              Write-Host "    ⏭️  $Source یافت نشد" -ForegroundColor DarkGray
+              Write-Host "    [SKIP] $Source not found" -ForegroundColor DarkGray
             }
             $global:LASTEXITCODE = 0
           }
@@ -572,7 +616,7 @@ jobs:
               /XD "Cache" "Code Cache" "GPUCache" "Service Worker" "Application Cache" "Media Cache" "GrShaderCache" "ShaderCache" `
               /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
             $size = (Get-ChildItem $chromeDst -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-            Write-Host "    ✅ Chrome: $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
+            Write-Host "    [OK] Chrome: $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
             $global:LASTEXITCODE = 0
           }
 
@@ -582,24 +626,42 @@ jobs:
             New-Item -ItemType Directory -Path $tgDst -Force | Out-Null
             robocopy $tgSrc $tgDst /E /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
             $size = (Get-ChildItem $tgDst -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-            Write-Host "    ✅ Telegram: $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
+            Write-Host "    [OK] Telegram: $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
             $global:LASTEXITCODE = 0
           }
 
           Write-Host ""
-          Write-Host "  🗜️  در حال فشرده‌سازی..." -ForegroundColor Yellow
+          Write-Host "  Saving desktop icon layout..." -ForegroundColor Cyan
+          $configDir = "$userDir\Documents\_rdp-config"
+          if (-not (Test-Path $configDir)) {
+            New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+          }
+          $regFile = "$configDir\desktop-icons.reg"
+          reg export "HKCU\Software\Microsoft\Windows\Shell\Bags\1\Desktop" $regFile /y 2>&1 | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "  [OK] Desktop layout saved" -ForegroundColor Green
+            $regStage = "$stage\Documents\_rdp-config"
+            if (-not (Test-Path $regStage)) {
+              New-Item -ItemType Directory -Path $regStage -Force | Out-Null
+            }
+            Copy-Item $regFile "$regStage\desktop-icons.reg" -Force
+          }
+          $global:LASTEXITCODE = 0
+
+          Write-Host ""
+          Write-Host "  Compressing..." -ForegroundColor Yellow
           Compress-Archive -Path "$stage\*" -DestinationPath $zipPath -Force -CompressionLevel Optimal -ErrorAction SilentlyContinue
 
           if (Test-Path $zipPath) {
             $zipGB = [math]::Round((Get-Item $zipPath).Length / 1GB, 3)
-            Write-Host "  ✅ بکاپ ساخته شد: $zipGB GB" -ForegroundColor Green
+            Write-Host "  [OK] Backup created: $zipGB GB" -ForegroundColor Green
 
             if ($zipGB -gt 10) {
-              Write-Host "  ⚠️  بیشتر از 10GB - حذف Downloads..." -ForegroundColor Red
+              Write-Host "  [WARN] Over 10GB - removing Downloads..." -ForegroundColor Red
               Remove-Item "$stage\Downloads" -Recurse -Force -ErrorAction SilentlyContinue
               Remove-Item $zipPath -Force
               Compress-Archive -Path "$stage\*" -DestinationPath $zipPath -Force -CompressionLevel Optimal
-              Write-Host "  ✅ حجم جدید: $([math]::Round((Get-Item $zipPath).Length/1GB,3)) GB" -ForegroundColor Green
+              Write-Host "  [OK] New size: $([math]::Round((Get-Item $zipPath).Length/1GB,3)) GB" -ForegroundColor Green
             }
           }
 
@@ -610,24 +672,25 @@ jobs:
           exit 0
 
       # ============================================================
-      # STEP 11: Upload to B2
+      # STEP 12: Upload to B2
       # ============================================================
-      - name: "☁️  آپلود بکاپ به B2"
+      - name: "Upload Backup to B2"
         if: always()
         continue-on-error: true
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ── آپلود به B2 ──" -ForegroundColor Magenta
+          Write-Host "  -- Uploading to B2 --" -ForegroundColor Magenta
 
           $zipPath = "C:\userdata.zip"
           if (-not (Test-Path $zipPath)) {
-            Write-Host "  ⏭️  فایل بکاپی وجود ندارد" -ForegroundColor Yellow            $global:LASTEXITCODE = 0
+            Write-Host "  [SKIP] No backup file" -ForegroundColor Yellow
+            $global:LASTEXITCODE = 0
             exit 0
           }
 
           $sizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
-          Write-Host "  📊 حجم: $sizeMB MB" -ForegroundColor Cyan
+          Write-Host "  Size: $sizeMB MB" -ForegroundColor Cyan
 
           $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
           $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
@@ -637,7 +700,7 @@ jobs:
 
           $uploaded = $false
           for ($attempt = 1; $attempt -le 5; $attempt++) {
-            Write-Host "  🔄 تلاش $attempt/5..." -ForegroundColor Cyan
+            Write-Host "  Attempt $attempt/5..." -ForegroundColor Cyan
             & $aws s3 cp $zipPath "s3://$env:B2_BUCKET/userdata.zip" --endpoint-url $endpoint --no-progress
             if ($LASTEXITCODE -eq 0) {
               $uploaded = $true
@@ -647,9 +710,9 @@ jobs:
           }
 
           if ($uploaded) {
-            Write-Host "  ✅ آپلود با موفقیت انجام شد" -ForegroundColor Green
+            Write-Host "  [OK] Upload successful" -ForegroundColor Green
           } else {
-            Write-Host "  ❌ آپلود پس از 5 تلاش ناموفق" -ForegroundColor Red
+            Write-Host "  [FAIL] Upload failed after 5 attempts" -ForegroundColor Red
           }
           Write-Host ""
 
@@ -657,17 +720,17 @@ jobs:
           exit 0
 
       # ============================================================
-      # STEP 12: Summary
+      # STEP 13: Final summary
       # ============================================================
-      - name: "📊 خلاصه نهایی"
+      - name: "Final Summary"
         if: always()
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-          Write-Host "  ║                  خلاصه اجرا                          ║" -ForegroundColor Cyan
-          Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+          Write-Host "  ======================================================" -ForegroundColor Cyan
+          Write-Host "                    RUN SUMMARY" -ForegroundColor Cyan
+          Write-Host "  ======================================================" -ForegroundColor Cyan
           Write-Host ""
-          Write-Host "  🕐 پایان    : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
-          Write-Host "  📌 وضعیت   : ${{ job.status }}" -ForegroundColor Gray
+          Write-Host "  End time : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
+          Write-Host "  Status   : ${{ job.status }}" -ForegroundColor Gray
           Write-Host ""
