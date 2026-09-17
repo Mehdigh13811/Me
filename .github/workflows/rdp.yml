@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 env:
-  RDP_PASSWORD: 'Mehdi@1381!'
+  RDP_PASSWORD: 'P@ssw0rd!2024'
   TAILSCALE_AUTHKEY: "tskey-auth-kM5gcJDL9B21CNTRL-dBrSevCy22avgAJ5j2kS2aviVpoQNKrF"
   B2_KEY_ID: "0047c90ff6f40880000000003"
   B2_APP_KEY: "K004GCg17BSNz0haTg+BN6lCp0k2/1o"
@@ -23,7 +23,7 @@ jobs:
         run: |
           Write-Host ""
           Write-Host "  ======================================================" -ForegroundColor Cyan
-          Write-Host "         GITHUB WINDOWS RDP - v11.0" -ForegroundColor Cyan
+          Write-Host "         GITHUB WINDOWS RDP - v12.0" -ForegroundColor Cyan
           Write-Host "         User: Mehdi" -ForegroundColor Cyan
           Write-Host "  ======================================================" -ForegroundColor Cyan
           Write-Host ""
@@ -211,6 +211,26 @@ jobs:
           Write-Host "  [OK] RDP enabled" -ForegroundColor Green
           Write-Host ""
 
+      - name: "Relax Password Policy"
+        shell: pwsh
+        run: |
+          Write-Host "  Relaxing password policy..." -ForegroundColor Yellow
+          try {
+            secedit /export /cfg C:\secpol.cfg 2>&1 | Out-Null
+            $content = Get-Content C:\secpol.cfg
+            $content = $content -replace 'PasswordComplexity = 1', 'PasswordComplexity = 0'
+            $content = $content -replace 'MinimumPasswordLength = \d+', 'MinimumPasswordLength = 8'
+            $content = $content -replace 'PasswordHistorySize = \d+', 'PasswordHistorySize = 0'
+            $content | Out-File C:\secpol.cfg -Encoding ASCII
+            secedit /configure /db C:\Windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY 2>&1 | Out-Null
+            Remove-Item C:\secpol.cfg -Force -ErrorAction SilentlyContinue
+            Write-Host "  [OK] Password policy relaxed" -ForegroundColor Green
+          } catch {
+            Write-Host "  [WARN] Could not relax policy: $_" -ForegroundColor Yellow
+          }
+          gpupdate /force 2>&1 | Out-Null
+          Write-Host ""
+
       - name: "Create Mehdi User"
         shell: pwsh
         run: |
@@ -225,34 +245,20 @@ jobs:
 
           Write-Host "  Password length: $($plainPassword.Length)" -ForegroundColor Gray
 
-          $securePass = ConvertTo-SecureString -String $plainPassword -AsPlainText -Force
-
           $existing = Get-LocalUser -Name $username -ErrorAction SilentlyContinue
           if ($existing) {
-            Write-Host "  User '$username' already exists - updating password" -ForegroundColor Yellow
-            try {
-              Set-LocalUser -Name $username -Password $securePass -PasswordNeverExpires $true -ErrorAction Stop
-              Write-Host "  [OK] Password updated" -ForegroundColor Green
-            } catch {
-              Write-Host "  [WARN] Set-LocalUser failed: $_" -ForegroundColor Yellow
-              net user $username $plainPassword 2>&1 | Out-Null
-            }
+            Write-Host "  User exists - updating password" -ForegroundColor Yellow
+            net user $username $plainPassword 2>&1 | Out-Null
+            Write-Host "  [OK] Password updated" -ForegroundColor Green
           } else {
-            Write-Host "  Creating new user..." -ForegroundColor Cyan
-            try {
-              New-LocalUser -Name $username -Password $securePass -PasswordNeverExpires -FullName "Mehdi" -Description "RDP User" -ErrorAction Stop
-              Write-Host "  [OK] User created" -ForegroundColor Green
-            } catch {
-              Write-Host "  [WARN] New-LocalUser failed - trying net user..." -ForegroundColor Yellow
-              Write-Host "  Error: $_" -ForegroundColor Gray
-              $result = net user $username $plainPassword /add /y 2>&1
-              Write-Host "  $result" -ForegroundColor Gray
-              if ($LASTEXITCODE -ne 0) {
-                Write-Host "  [FAIL] Could not create user" -ForegroundColor Red
-                exit 1
-              }
-              Write-Host "  [OK] User created via net user" -ForegroundColor Green
+            Write-Host "  Creating user via net user..." -ForegroundColor Cyan
+            $result = net user $username $plainPassword /add /y 2>&1
+            Write-Host "  $result" -ForegroundColor Gray
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "  [FAIL] Could not create user" -ForegroundColor Red
+              exit 1
             }
+            Write-Host "  [OK] User created" -ForegroundColor Green
           }
 
           net user $username /expires:never 2>&1 | Out-Null
@@ -264,7 +270,6 @@ jobs:
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username -ErrorAction SilentlyContinue
           Write-Host "  [OK] Added to Remote Desktop Users" -ForegroundColor Green
 
-          Write-Host "  Creating user profile..." -ForegroundColor Cyan
           $userProfilePath = "C:\Users\$username"
           if (-not (Test-Path $userProfilePath)) {
             New-Item -ItemType Directory -Path $userProfilePath -Force | Out-Null
@@ -277,8 +282,6 @@ jobs:
             New-Item -ItemType Directory -Path "$userProfilePath\AppData\Roaming" -Force | Out-Null
             New-Item -ItemType Directory -Path "$userProfilePath\AppData\Local" -Force | Out-Null
             Write-Host "  [OK] Profile folders created" -ForegroundColor Green
-          } else {
-            Write-Host "  [OK] Profile already exists" -ForegroundColor Green
           }
 
           net user runneradmin $plainPassword 2>$null | Out-Null
@@ -286,11 +289,9 @@ jobs:
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "runneradmin" -ErrorAction SilentlyContinue
 
           Write-Host ""
-          Write-Host "  User info:" -ForegroundColor Cyan
           Get-LocalUser -Name $username | Format-Table Name, Enabled, LastLogon -AutoSize
-
           Write-Host ""
-          Write-Host "  [OK] Mehdi user is ready for RDP" -ForegroundColor Green
+          Write-Host "  [OK] Mehdi user is ready" -ForegroundColor Green
           Write-Host ""
 
       - name: "Ensure Telegram Portable on B2"
@@ -535,7 +536,7 @@ jobs:
           Write-Host "  ------------------------------------------------------" -ForegroundColor Cyan
           Write-Host "  IP       : $tsIP" -ForegroundColor White
           Write-Host "  Username : Mehdi" -ForegroundColor White
-          Write-Host "  Password : Mehdi@1381!" -ForegroundColor White
+          Write-Host "  Password : P@ssw0rd!2024" -ForegroundColor White
           Write-Host "  Port     : 3389" -ForegroundColor White
           Write-Host "  ------------------------------------------------------" -ForegroundColor Cyan
           Write-Host ""
