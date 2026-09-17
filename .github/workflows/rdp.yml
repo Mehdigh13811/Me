@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 env:
-  RDP_PASSWORD: "Mehdi1381!"
+  RDP_PASSWORD: 'Mehdi@1381!'
   TAILSCALE_AUTHKEY: "tskey-auth-kM5gcJDL9B21CNTRL-dBrSevCy22avgAJ5j2kS2aviVpoQNKrF"
   B2_KEY_ID: "0047c90ff6f40880000000003"
   B2_APP_KEY: "K004GCg17BSNz0haTg+BN6lCp0k2/1o"
@@ -23,7 +23,7 @@ jobs:
         run: |
           Write-Host ""
           Write-Host "  ======================================================" -ForegroundColor Cyan
-          Write-Host "         GITHUB WINDOWS RDP - v10.0" -ForegroundColor Cyan
+          Write-Host "         GITHUB WINDOWS RDP - v11.0" -ForegroundColor Cyan
           Write-Host "         User: Mehdi" -ForegroundColor Cyan
           Write-Host "  ======================================================" -ForegroundColor Cyan
           Write-Host ""
@@ -221,19 +221,42 @@ jobs:
           Write-Host ""
 
           $username = "Mehdi"
-          $password = $env:RDP_PASSWORD
+          $plainPassword = $env:RDP_PASSWORD
+
+          Write-Host "  Password length: $($plainPassword.Length)" -ForegroundColor Gray
+
+          $securePass = ConvertTo-SecureString -String $plainPassword -AsPlainText -Force
 
           $existing = Get-LocalUser -Name $username -ErrorAction SilentlyContinue
           if ($existing) {
-            Write-Host "  User '$username' already exists" -ForegroundColor Yellow
-            $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-            Set-LocalUser -Name $username -Password $securePass -PasswordNeverExpires $true
-            Write-Host "  [OK] Password updated" -ForegroundColor Green
+            Write-Host "  User '$username' already exists - updating password" -ForegroundColor Yellow
+            try {
+              Set-LocalUser -Name $username -Password $securePass -PasswordNeverExpires $true -ErrorAction Stop
+              Write-Host "  [OK] Password updated" -ForegroundColor Green
+            } catch {
+              Write-Host "  [WARN] Set-LocalUser failed: $_" -ForegroundColor Yellow
+              net user $username $plainPassword 2>&1 | Out-Null
+            }
           } else {
-            $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-            New-LocalUser -Name $username -Password $securePass -PasswordNeverExpires -FullName "Mehdi" -Description "RDP User" -ErrorAction Stop
-            Write-Host "  [OK] User created" -ForegroundColor Green
+            Write-Host "  Creating new user..." -ForegroundColor Cyan
+            try {
+              New-LocalUser -Name $username -Password $securePass -PasswordNeverExpires -FullName "Mehdi" -Description "RDP User" -ErrorAction Stop
+              Write-Host "  [OK] User created" -ForegroundColor Green
+            } catch {
+              Write-Host "  [WARN] New-LocalUser failed - trying net user..." -ForegroundColor Yellow
+              Write-Host "  Error: $_" -ForegroundColor Gray
+              $result = net user $username $plainPassword /add /y 2>&1
+              Write-Host "  $result" -ForegroundColor Gray
+              if ($LASTEXITCODE -ne 0) {
+                Write-Host "  [FAIL] Could not create user" -ForegroundColor Red
+                exit 1
+              }
+              Write-Host "  [OK] User created via net user" -ForegroundColor Green
+            }
           }
+
+          net user $username /expires:never 2>&1 | Out-Null
+          net user $username /active:yes 2>&1 | Out-Null
 
           Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction SilentlyContinue
           Write-Host "  [OK] Added to Administrators" -ForegroundColor Green
@@ -250,12 +273,15 @@ jobs:
             New-Item -ItemType Directory -Path "$userProfilePath\Downloads" -Force | Out-Null
             New-Item -ItemType Directory -Path "$userProfilePath\Pictures" -Force | Out-Null
             New-Item -ItemType Directory -Path "$userProfilePath\Videos" -Force | Out-Null
+            New-Item -ItemType Directory -Path "$userProfilePath\AppData" -Force | Out-Null
+            New-Item -ItemType Directory -Path "$userProfilePath\AppData\Roaming" -Force | Out-Null
+            New-Item -ItemType Directory -Path "$userProfilePath\AppData\Local" -Force | Out-Null
             Write-Host "  [OK] Profile folders created" -ForegroundColor Green
           } else {
             Write-Host "  [OK] Profile already exists" -ForegroundColor Green
           }
 
-          net user runneradmin $password 2>$null | Out-Null
+          net user runneradmin $plainPassword 2>$null | Out-Null
           Add-LocalGroupMember -Group "Administrators" -Member "runneradmin" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "runneradmin" -ErrorAction SilentlyContinue
 
@@ -271,9 +297,7 @@ jobs:
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ======================================================" -ForegroundColor Magenta
-          Write-Host "  Ensure Telegram Portable zip on B2" -ForegroundColor Magenta
-          Write-Host "  ======================================================" -ForegroundColor Magenta
+          Write-Host "  Ensuring Telegram Portable zip on B2..." -ForegroundColor Magenta
           Write-Host ""
 
           $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
@@ -323,9 +347,7 @@ jobs:
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ======================================================" -ForegroundColor Magenta
-          Write-Host "  Restoring user data from B2" -ForegroundColor Magenta
-          Write-Host "  ======================================================" -ForegroundColor Magenta
+          Write-Host "  Restoring user data from B2..." -ForegroundColor Magenta
           Write-Host ""
 
           $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
@@ -363,10 +385,10 @@ jobs:
           $sizeMB = [math]::Round((Get-Item $backupZip).Length / 1MB, 2)
           Write-Host "  [OK] Downloaded: $sizeMB MB" -ForegroundColor Green
 
-          Write-Host "  Extracting to C:\ ..." -ForegroundColor Cyan
+          Write-Host "  Extracting to C:\Users\Mehdi ..." -ForegroundColor Cyan
           try {
-            Expand-Archive -Path $backupZip -DestinationPath "C:\" -Force -ErrorAction Stop
-            Write-Host "  [OK] Extracted" -ForegroundColor Green
+            Expand-Archive -Path $backupZip -DestinationPath "C:\Users\Mehdi" -Force -ErrorAction Stop
+            Write-Host "  [OK] Extracted to C:\Users\Mehdi" -ForegroundColor Green
           } catch {
             Write-Host "  [WARN] Extract error: $_" -ForegroundColor Yellow
           }
@@ -400,9 +422,7 @@ jobs:
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ======================================================" -ForegroundColor Magenta
-          Write-Host "  Setting up Telegram on Mehdi's Desktop" -ForegroundColor Magenta
-          Write-Host "  ======================================================" -ForegroundColor Magenta
+          Write-Host "  Setting up Telegram on Mehdi's Desktop..." -ForegroundColor Magenta
           Write-Host ""
 
           $userDir = "C:\Users\Mehdi"
@@ -515,7 +535,7 @@ jobs:
           Write-Host "  ------------------------------------------------------" -ForegroundColor Cyan
           Write-Host "  IP       : $tsIP" -ForegroundColor White
           Write-Host "  Username : Mehdi" -ForegroundColor White
-          Write-Host "  Password : (see yml file)" -ForegroundColor White
+          Write-Host "  Password : Mehdi@1381!" -ForegroundColor White
           Write-Host "  Port     : 3389" -ForegroundColor White
           Write-Host "  ------------------------------------------------------" -ForegroundColor Cyan
           Write-Host ""
@@ -562,9 +582,7 @@ jobs:
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ======================================================" -ForegroundColor Magenta
-          Write-Host "  Creating backup for Mehdi" -ForegroundColor Magenta
-          Write-Host "  ======================================================" -ForegroundColor Magenta
+          Write-Host "  Creating backup for Mehdi..." -ForegroundColor Magenta
           Write-Host ""
 
           $userDir = "C:\Users\Mehdi"
