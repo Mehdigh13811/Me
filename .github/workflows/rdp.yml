@@ -567,4 +567,70 @@ jobs:
               Write-Host "  ⚠️  بیشتر از 10GB - حذف Downloads..." -ForegroundColor Red
               Remove-Item "$stage\Downloads" -Recurse -Force -ErrorAction SilentlyContinue
               Remove-Item $zipPath -Force
-              Compress-Archive -Path "$stage\
+              Compress-Archive -Path "$stage\*" -DestinationPath $zipPath -Force -CompressionLevel Optimal
+              Write-Host "  ✅ حجم جدید: $([math]::Round((Get-Item $zipPath).Length/1GB,3)) GB" -ForegroundColor Green
+            }
+          }
+
+          Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host ""
+
+      # ============================================================
+      # STEP 11: Upload to B2
+      # ============================================================
+      - name: "☁️  آپلود بکاپ به B2"
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "  ── آپلود به B2 ──" -ForegroundColor Magenta
+
+          $zipPath = "C:\userdata.zip"
+          if (-not (Test-Path $zipPath)) {
+            Write-Host "  ⏭️  فایل بکاپی وجود ندارد" -ForegroundColor Yellow
+            exit 0
+          }
+
+          $sizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
+          Write-Host "  📊 حجم: $sizeMB MB" -ForegroundColor Cyan
+
+          $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
+          $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
+          $env:AWS_DEFAULT_REGION    = $env:B2_REGION
+          $aws = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
+          $endpoint = "https://$env:B2_ENDPOINT"
+
+          $uploaded = $false
+          for ($attempt = 1; $attempt -le 5; $attempt++) {
+            Write-Host "  🔄 تلاش $attempt/5..." -ForegroundColor Cyan
+            & $aws s3 cp $zipPath "s3://$env:B2_BUCKET/userdata.zip" --endpoint-url $endpoint --no-progress
+            if ($LASTEXITCODE -eq 0) {
+              $uploaded = $true
+              break
+            }
+            Start-Sleep -Seconds 15
+          }
+
+          if ($uploaded) {
+            Write-Host "  ✅ آپلود با موفقیت انجام شد" -ForegroundColor Green
+          } else {
+            Write-Host "  ❌ آپلود پس از 5 تلاش ناموفق" -ForegroundColor Red
+          }
+          Write-Host ""
+
+      # ============================================================
+      # STEP 12: Summary
+      # ============================================================
+      - name: "📊 خلاصه نهایی"
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+          Write-Host "  ║                  خلاصه اجرا                          ║" -ForegroundColor Cyan
+          Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+          Write-Host ""
+          Write-Host "  🕐 پایان    : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
+          Write-Host "  📌 وضعیت   : ${{ job.status }}" -ForegroundColor Gray
+          Write-Host ""
