@@ -123,113 +123,118 @@ jobs:
           Write-Host ""
           Write-Host "  ✅ [1/4] همه متغیرها معتبر هستند" -ForegroundColor Green
           Write-Host ""
+          
+          # ============================================================
+# STEP 2: PRE-FLIGHT - تست اتصال Backblaze B2
+# ============================================================
+- name: "🔍 [2/4] تست اتصال Backblaze B2"
+  shell: pwsh
+  run: |
+    Write-Host ""
+    Write-Host "  ┌──────────────────────────────────────────────────────┐" -ForegroundColor Yellow
+    Write-Host "  │  تست اتصال و احراز هویت Backblaze B2                │" -ForegroundColor Yellow
+    Write-Host "  └──────────────────────────────────────────────────────┘" -ForegroundColor Yellow
+    Write-Host ""
 
-      # ============================================================
-      # STEP 2: PRE-FLIGHT - تست اتصال Backblaze B2
-      # ============================================================
-      - name: "🔍 [2/4] تست اتصال Backblaze B2"
-        shell: pwsh
-        run: |
-          Write-Host ""
-          Write-Host "  ┌──────────────────────────────────────────────────────┐" -ForegroundColor Yellow
-          Write-Host "  │  تست اتصال و احراز هویت Backblaze B2                │" -ForegroundColor Yellow
-          Write-Host "  └──────────────────────────────────────────────────────┘" -ForegroundColor Yellow
-          Write-Host ""
+    # نصب AWS CLI
+    Write-Host "  📦 نصب AWS CLI..." -ForegroundColor Cyan
+    $installer = "$env:TEMP\AWSCLIV2.msi"
+    try {
+      if (-not (Test-Path "C:\Program Files\Amazon\AWSCLIV2\aws.exe")) {
+        Invoke-WebRequest -Uri "https://awscli.amazonaws.com/AWSCLIV2.msi" -OutFile $installer -UseBasicParsing -ErrorAction Stop
+        Start-Process msiexec.exe -ArgumentList "/i $installer /quiet /norestart" -Wait
+        Start-Sleep -Seconds 5
+      }
+      $aws = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
+      if (-not (Test-Path $aws)) {
+        throw "AWS CLI نصب نشد"
+      }
+      $ver = & $aws --version 2>&1
+      Write-Host "  ✅ AWS CLI آماده: $ver" -ForegroundColor Green
+    } catch {
+      Write-Host "  ❌ نصب AWS CLI ناموفق: $_" -ForegroundColor Red
+      exit 1
+    }
 
-          # نصب AWS CLI
-          Write-Host "  📦 نصب AWS CLI..." -ForegroundColor Cyan
-          $installer = "$env:TEMP\AWSCLIV2.msi"
-          try {
-            if (-not (Test-Path "C:\Program Files\Amazon\AWSCLIV2\aws.exe")) {
-              Invoke-WebRequest -Uri "https://awscli.amazonaws.com/AWSCLIV2.msi" -OutFile $installer -UseBasicParsing -ErrorAction Stop
-              Start-Process msiexec.exe -ArgumentList "/i $installer /quiet /norestart" -Wait
-              Start-Sleep -Seconds 5
-            }
-            $aws = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
-            if (-not (Test-Path $aws)) {
-              throw "AWS CLI نصب نشد"
-            }
-            $ver = & $aws --version 2>&1
-            Write-Host "  ✅ AWS CLI آماده: $ver" -ForegroundColor Green
-          } catch {
-            Write-Host "  ❌ نصب AWS CLI ناموفق: $_" -ForegroundColor Red
-            exit 1
-          }
+    Write-Host ""
+    $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
+    $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
+    $env:AWS_DEFAULT_REGION    = $env:B2_REGION
 
-          Write-Host ""
-          $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
-          $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
-          $env:AWS_DEFAULT_REGION    = $env:B2_REGION
+    $endpoint = "https://$env:B2_ENDPOINT"
 
-          $endpoint = "https://$env:B2_ENDPOINT"
+    # ════════════════════════════════════════════════════════
+    # تست ۱: دسترسی به خود باکِت (head-bucket)
+    # این با کلیدهای محدود به باکِت هم کار می‌کند
+    # ════════════════════════════════════════════════════════
+    Write-Host "  🔐 تست دسترسی به باکِت '$env:B2_BUCKET'..." -ForegroundColor Cyan
+    $head = & $aws s3api head-bucket --bucket $env:B2_BUCKET --endpoint-url $endpoint 2>&1
+    $headExit = $LASTEXITCODE
 
-          # تست ۱: لیست باکِت‌ها (احراز هویت)
-          Write-Host "  🔐 تست احراز هویت (list-buckets)..." -ForegroundColor Cyan
-          $buckets = & $aws s3api list-buckets --endpoint-url $endpoint 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "  ❌ احراز هویت ناموفق!" -ForegroundColor Red
-            Write-Host ""
-            Write-Host "  جزئیات خطا:" -ForegroundColor Yellow
-            Write-Host "  $buckets" -ForegroundColor Gray
-            Write-Host ""
-            Write-Host "  دلایل محتمل:" -ForegroundColor Yellow
-            Write-Host "    • B2_KEY_ID یا B2_APP_KEY اشتباه است" -ForegroundColor Gray
-            Write-Host "    • کلید revoke شده یا منقضی شده" -ForegroundColor Gray
-            Write-Host "    • دسترسی s3:ListAllMyBuckets ندارد" -ForegroundColor Gray
-            exit 1
-          }
-          Write-Host "  ✅ احراز هویت موفق" -ForegroundColor Green
+    if ($headExit -ne 0) {
+      Write-Host "  ❌ دسترسی به باکِت ناموفق!" -ForegroundColor Red
+      Write-Host ""
+      Write-Host "  جزئیات خطا:" -ForegroundColor Yellow
+      Write-Host "  $head" -ForegroundColor Gray
+      Write-Host ""
+      Write-Host "  دلایل محتمل:" -ForegroundColor Yellow
+      Write-Host "    • نام باکِت اشتباه است (به حروف بزرگ/کوچک حساس است)" -ForegroundColor Gray
+      Write-Host "    • کلید B2 به این باکِت دسترسی ندارد" -ForegroundColor Gray
+      Write-Host "    • B2_KEY_ID یا B2_APP_KEY اشتباه است" -ForegroundColor Gray
+      Write-Host "    • کلید revoke شده یا منقضی شده" -ForegroundColor Gray
+      Write-Host "    • B2_ENDPOINT اشتباه است (باید با منطقه باکِت هم‌خوان باشد)" -ForegroundColor Gray
+      Write-Host ""
+      Write-Host "  💡 نکته: کلید B2 باید حداقل دسترسی read+write به این باکِت داشته باشد." -ForegroundColor Yellow
+      exit 1
+    }
+    Write-Host "  ✅ دسترسی به باکِت OK" -ForegroundColor Green
 
-          # تست ۲: بررسی وجود باکِت
-          Write-Host ""
-          Write-Host "  🪣 بررسی وجود باکِت '$env:B2_BUCKET'..." -ForegroundColor Cyan
-          $head = & $aws s3api head-bucket --bucket $env:B2_BUCKET --endpoint-url $endpoint 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "  ❌ باکِت '$env:B2_BUCKET' در دسترس نیست!" -ForegroundColor Red
-            Write-Host ""
-            Write-Host "  جزئیات: $head" -ForegroundColor Gray
-            Write-Host ""
-            Write-Host "  نکته: نام باکِت Backblaze باید lowercase باشد." -ForegroundColor Yellow
-            exit 1
-          }
-          Write-Host "  ✅ باکِت '$env:B2_BUCKET' در دسترس است" -ForegroundColor Green
+    # ════════════════════════════════════════════════════════
+    # تست ۲: دسترسی نوشتن (put + delete)
+    # ════════════════════════════════════════════════════════
+    Write-Host ""
+    Write-Host "  📝 تست دسترسی نوشتن..." -ForegroundColor Cyan
+    $testFile = "$env:TEMP\b2-test-$(Get-Random).txt"
+    "connectivity test" | Out-File -FilePath $testFile -Encoding utf8
+    $testKey = "_connectivity-test.txt"
 
-          # تست ۳: دسترسی read/write
-          Write-Host ""
-          Write-Host "  📝 تست دسترسی نوشتن..." -ForegroundColor Cyan
-          $testFile = "$env:TEMP\b2-test-$(Get-Random).txt"
-          "connectivity test" | Out-File -FilePath $testFile -Encoding utf8
-          $testKey = "_connectivity-test.txt"
+    $put = & $aws s3 cp $testFile "s3://$env:B2_BUCKET/$testKey" --endpoint-url $endpoint --no-progress 2>&1
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host "  ❌ دسترسی نوشتن ندارد!" -ForegroundColor Red
+      Write-Host ""
+      Write-Host "  جزئیات: $put" -ForegroundColor Gray
+      Write-Host ""
+      Write-Host "  💡 کلید B2 باید دسترسی writeFiles داشته باشد." -ForegroundColor Yellow
+      Remove-Item $testFile -Force -ErrorAction SilentlyContinue
+      exit 1
+    }
+    Write-Host "  ✅ دسترسی نوشتن OK" -ForegroundColor Green
 
-          $put = & $aws s3 cp $testFile "s3://$env:B2_BUCKET/$testKey" --endpoint-url $endpoint --no-progress 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "  ❌ دسترسی نوشتن ندارد!" -ForegroundColor Red
-            Write-Host "  $put" -ForegroundColor Gray
-            Remove-Item $testFile -Force -ErrorAction SilentlyContinue
-            exit 1
-          }
-          Write-Host "  ✅ دسترسی نوشتن OK" -ForegroundColor Green
+    Write-Host "  🗑️  پاکسازی فایل تست..." -ForegroundColor Cyan
+    & $aws s3 rm "s3://$env:B2_BUCKET/$testKey" --endpoint-url $endpoint 2>&1 | Out-Null
+    Remove-Item $testFile -Force -ErrorAction SilentlyContinue
 
-          Write-Host "  🗑️  پاکسازی فایل تست..." -ForegroundColor Cyan
-          & $aws s3 rm "s3://$env:B2_BUCKET/$testKey" --endpoint-url $endpoint 2>&1 | Out-Null
-          Remove-Item $testFile -Force -ErrorAction SilentlyContinue
+    # ════════════════════════════════════════════════════════
+    # تست ۳: بررسی وجود بکاپ قبلی (بدون لیست کردن)
+    # ════════════════════════════════════════════════════════
+    Write-Host ""
+    Write-Host "  📂 بررسی وجود بکاپ قبلی..." -ForegroundColor Cyan
+    $obj = & $aws s3api head-object --bucket $env:B2_BUCKET --key "userdata.zip" --endpoint-url $endpoint 2>&1
+    if ($LASTEXITCODE -eq 0) {
+      try {
+        $sizeInfo = ($obj | ConvertFrom-Json).ContentLength
+        $sizeMB = [math]::Round($sizeInfo / 1MB, 2)
+        Write-Host "  ✅ بکاپ قبلی پیدا شد: $sizeMB MB" -ForegroundColor Green
+      } catch {
+        Write-Host "  ✅ بکاپ قبلی پیدا شد" -ForegroundColor Green
+      }
+    } else {
+      Write-Host "  ℹ️  بکاپ قبلی وجود ندارد (اولین اجرا)" -ForegroundColor Yellow
+    }
 
-          # تست ۴: بررسی وجود بکاپ قبلی
-          Write-Host ""
-          Write-Host "  📂 بررسی وجود بکاپ قبلی..." -ForegroundColor Cyan
-          $obj = & $aws s3api head-object --bucket $env:B2_BUCKET --key "userdata.zip" --endpoint-url $endpoint 2>&1
-          if ($LASTEXITCODE -eq 0) {
-            $sizeInfo = ($obj | ConvertFrom-Json).ContentLength
-            $sizeMB = [math]::Round($sizeInfo / 1MB, 2)
-            Write-Host "  ✅ بکاپ قبلی پیدا شد: $sizeMB MB" -ForegroundColor Green
-            Write-Host "##[set-output name=has_backup]true"
-          } else {
-            Write-Host "  ℹ️  بکاپ قبلی وجود ندارد (اولین اجرا)" -ForegroundColor Yellow
-          }
-
-          Write-Host ""
-          Write-Host "  ✅ [2/4] Backblaze B2 کاملاً آماده است" -ForegroundColor Green
-          Write-Host ""
+    Write-Host ""
+    Write-Host "  ✅ [2/4] Backblaze B2 کاملاً آماده است" -ForegroundColor Green
+    Write-Host ""
 
       # ============================================================
       # STEP 3: PRE-FLIGHT - تست اتصال Tailscale
