@@ -222,6 +222,10 @@ jobs:
           Write-Host "  ✅ [2/4] Backblaze B2 کاملاً آماده است" -ForegroundColor Green
           Write-Host ""
 
+          # اطمینان از خروج موفق - چون head-object ممکنه exit code غیر صفر بده
+          $global:LASTEXITCODE = 0
+          exit 0
+
       # ============================================================
       # STEP 3: PRE-FLIGHT - تست اتصال Tailscale
       # ============================================================
@@ -315,6 +319,9 @@ jobs:
           "TAILSCALE_IP=$tsIP" | Out-File -FilePath "$env:GITHUB_ENV" -Append -Encoding utf8
           "TAILSCALE_HOSTNAME=$hostname" | Out-File -FilePath "$env:GITHUB_ENV" -Append -Encoding utf8
 
+          $global:LASTEXITCODE = 0
+          exit 0
+
       # ============================================================
       # STEP 4: PRE-FLIGHT - خلاصه بررسی‌ها
       # ============================================================
@@ -403,6 +410,7 @@ jobs:
           & $aws s3api head-object --bucket $env:B2_BUCKET --key "userdata.zip" --endpoint-url $endpoint 2>$null | Out-Null
           if ($LASTEXITCODE -ne 0) {
             Write-Host "  ℹ️  بکاپ قبلی وجود ندارد - اولین اجرا" -ForegroundColor Yellow
+            $global:LASTEXITCODE = 0
             exit 0
           }
 
@@ -435,6 +443,9 @@ jobs:
           }
           Write-Host ""
 
+          $global:LASTEXITCODE = 0
+          exit 0
+
       # ============================================================
       # STEP 8: نمایش اطلاعات اتصال
       # ============================================================
@@ -458,6 +469,9 @@ jobs:
           Write-Host "  │  🔌 Port     : 3389" -ForegroundColor White
           Write-Host "  └──────────────────────────────────────────────────────┘" -ForegroundColor Cyan
           Write-Host ""
+
+          $global:LASTEXITCODE = 0
+          exit 0
 
       # ============================================================
       # STEP 9: Keep Alive (5 hours)
@@ -493,6 +507,9 @@ jobs:
           Write-Host "  ✅ Keep Alive تمام شد" -ForegroundColor Green
           Write-Host ""
 
+          $global:LASTEXITCODE = 0
+          exit 0
+
       # ============================================================
       # STEP 10: Create Backup Zip
       # ============================================================
@@ -527,6 +544,8 @@ jobs:
             } else {
               Write-Host "    ⏭️  $Source یافت نشد" -ForegroundColor DarkGray
             }
+            # robocopy exit codes غیر صفر داره - ریست کن
+            $global:LASTEXITCODE = 0
           }
 
           Copy-Folder "$userDir\Desktop"   "Desktop"
@@ -544,6 +563,7 @@ jobs:
               /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
             $size = (Get-ChildItem $chromeDst -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
             Write-Host "    ✅ Chrome: $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
+            $global:LASTEXITCODE = 0
           }
 
           $tgSrc = "$userDir\AppData\Roaming\Telegram Desktop\tdata"
@@ -553,6 +573,7 @@ jobs:
             robocopy $tgSrc $tgDst /E /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
             $size = (Get-ChildItem $tgDst -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
             Write-Host "    ✅ Telegram: $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
+            $global:LASTEXITCODE = 0
           }
 
           Write-Host ""
@@ -575,6 +596,9 @@ jobs:
           Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
           Write-Host ""
 
+          $global:LASTEXITCODE = 0
+          exit 0
+
       # ============================================================
       # STEP 11: Upload to B2
       # ============================================================
@@ -589,6 +613,7 @@ jobs:
           $zipPath = "C:\userdata.zip"
           if (-not (Test-Path $zipPath)) {
             Write-Host "  ⏭️  فایل بکاپی وجود ندارد" -ForegroundColor Yellow
+            $global:LASTEXITCODE = 0
             exit 0
           }
 
@@ -618,6 +643,9 @@ jobs:
             Write-Host "  ❌ آپلود پس از 5 تلاش ناموفق" -ForegroundColor Red
           }
           Write-Host ""
+
+          $global:LASTEXITCODE = 0
+          exit 0
 
       # ============================================================
       # STEP 12: Summary
