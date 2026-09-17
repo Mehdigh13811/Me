@@ -1,4 +1,4 @@
-name: Windows Cloud RDP (Auto Backup to B2)
+name: Windows
 
 on:
   workflow_dispatch:
