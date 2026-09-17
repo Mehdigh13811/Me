@@ -1,4 +1,4 @@
-name: Windows
+name: Windows Cloud RDP (Auto Backup to B2)
 
 on:
   workflow_dispatch:
@@ -23,7 +23,7 @@ jobs:
         run: |
           Write-Host ""
           Write-Host "  ======================================================" -ForegroundColor Cyan
-          Write-Host "         GITHUB WINDOWS RDP - v7.0" -ForegroundColor Cyan
+          Write-Host "         GITHUB WINDOWS RDP - v8.0" -ForegroundColor Cyan
           Write-Host "         Full Pre-flight Validation" -ForegroundColor Cyan
           Write-Host "  ======================================================" -ForegroundColor Cyan
           Write-Host ""
@@ -216,9 +216,7 @@ jobs:
             $tcp = New-Object System.Net.Sockets.TcpClient
             $connect = $tcp.BeginConnect("login.tailscale.com", 443, $null, $null)
             $success = $connect.AsyncWaitHandle.WaitOne(10000, $false)
-            if (-not $success) {
-              throw "TCP connect timed out"
-            }
+            if (-not $success) { throw "TCP connect timed out" }
             $tcp.EndConnect($connect)
             $tcp.Close()
             Write-Host "  [OK] Tailscale is reachable (TCP:443)" -ForegroundColor Green
@@ -253,30 +251,54 @@ jobs:
           Write-Host "  [OK] Tailscale installed" -ForegroundColor Green
 
           Write-Host ""
-          Write-Host "  Connecting with AuthKey..." -ForegroundColor Cyan
-          $hostname = "github-rdp-$(Get-Random -Maximum 9999)"
-          $connectOutput = & $tsExe up --authkey="$env:TAILSCALE_AUTHKEY" --hostname=$hostname --accept-routes 2>&1
-          $connectExit = $LASTEXITCODE
+          Write-Host "  Starting Tailscale service..." -ForegroundColor Cyan
+          Get-Service -Name "Tailscale" | Start-Service -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 5
 
-          if ($connectExit -ne 0) {
-            Write-Host "  [FAIL] Tailscale connection failed!" -ForegroundColor Red
-            Write-Host ""
-            Write-Host "  Output:" -ForegroundColor Yellow
-            Write-Host "  $connectOutput" -ForegroundColor Gray
-            Write-Host ""
-            Write-Host "  Possible causes:" -ForegroundColor Yellow
-            Write-Host "    - AuthKey invalid or revoked" -ForegroundColor Gray
-            Write-Host "    - AuthKey expired" -ForegroundColor Gray
-            Write-Host "    - AuthKey reached device limit" -ForegroundColor Gray
-            exit 1
+          Write-Host ""
+          Write-Host "  Connecting with AuthKey (retry mode)..." -ForegroundColor Cyan
+          $hostname = "github-rdp-$(Get-Random -Maximum 9999)"
+
+          $maxAttempts = 6
+          $connected = $false
+          $tsIP = ""
+
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            Write-Host "  Connection attempt $attempt/$maxAttempts..." -ForegroundColor Cyan
+
+            & $tsExe up --authkey="$env:TAILSCALE_AUTHKEY" --hostname=$hostname --accept-routes 2>&1 | Out-Null
+            Start-Sleep -Seconds 10
+
+            $tsIP = & $tsExe ip -4 2>&1
+            $tsIP = "$tsIP".Trim()
+
+            if ($tsIP -match '^\d+\.\d+\.\d+\.\d+$') {
+              $connected = $true
+              Write-Host "  [OK] Connected! IP: $tsIP" -ForegroundColor Green
+              break
+            } else {
+              Write-Host "  [WAIT] IP not ready yet (got: $tsIP)" -ForegroundColor Yellow
+              Start-Sleep -Seconds 10
+            }
           }
 
-          Start-Sleep -Seconds 15
-
-          $tsIP = & $tsExe ip -4 2>&1
-          if ([string]::IsNullOrWhiteSpace($tsIP) -or $tsIP -match 'error') {
-            Write-Host "  [FAIL] Tailscale IP not received" -ForegroundColor Red
-            Write-Host "  $tsIP" -ForegroundColor Gray
+          if (-not $connected) {
+            Write-Host ""
+            Write-Host "  [FAIL] Tailscale did not connect after $maxAttempts attempts" -ForegroundColor Red
+            Write-Host ""
+            $tsStatus = & $tsExe status 2>&1
+            Write-Host "  Status:" -ForegroundColor Yellow
+            Write-Host "  $tsStatus" -ForegroundColor Gray
+            Write-Host ""
+            Write-Host "  Possible causes:" -ForegroundColor Yellow
+            Write-Host "    - AuthKey is expired" -ForegroundColor Gray
+            Write-Host "    - AuthKey is single-use and already consumed" -ForegroundColor Gray
+            Write-Host "    - AuthKey is not reusable" -ForegroundColor Gray
+            Write-Host "    - Network/DNS issue" -ForegroundColor Gray
+            Write-Host ""
+            Write-Host "  Fix: Generate a new reusable AuthKey from Tailscale admin panel" -ForegroundColor Cyan
+            Write-Host "    Settings -> Keys -> Generate auth key" -ForegroundColor Cyan
+            Write-Host "    Make sure 'Reusable' is ON" -ForegroundColor Cyan
             exit 1
           }
 
@@ -433,69 +455,85 @@ jobs:
 
           $userDir = "C:\Users\Administrator"
           $desktop = "$userDir\Desktop"
-          $appDir  = "$userDir\AppData\Roaming\Telegram Desktop"
-          $tgExe   = "$appDir\Telegram.exe"
 
           if (-not (Test-Path $desktop)) {
             Write-Host "  Desktop folder missing - creating..." -ForegroundColor Yellow
             New-Item -ItemType Directory -Path $desktop -Force | Out-Null
           }
 
-          if (Test-Path $tgExe) {
-            Write-Host "  [OK] Telegram already installed at: $tgExe" -ForegroundColor Green
-          } else {
-            Write-Host "  Trying winget..." -ForegroundColor Cyan
-            $wingetOk = $false
+          $tgExe = $null
+          $possiblePaths = @(
+            "$userDir\AppData\Roaming\Telegram Desktop\Telegram.exe",
+            "$userDir\AppData\Local\Telegram Desktop\Telegram.exe",
+            "C:\Program Files\Telegram Desktop\Telegram.exe",
+            "C:\Program Files (x86)\Telegram Desktop\Telegram.exe"
+          )
+          foreach ($p in $possiblePaths) {
+            if (Test-Path $p) {
+              $tgExe = $p
+              Write-Host "  [OK] Telegram already installed at: $p" -ForegroundColor Green
+              break
+            }
+          }
+
+          if (-not $tgExe) {
+            Write-Host "  Downloading Telegram installer..." -ForegroundColor Cyan
+            $tgInstaller = "C:\telegram-setup.exe"
             try {
-              $wingetOut = & winget install --id Telegram.TelegramDesktop `
-                --accept-package-agreements --accept-source-agreements `
-                --silent --scope user 2>&1
-              Write-Host "  winget output:" -ForegroundColor Gray
-              Write-Host "  $wingetOut" -ForegroundColor DarkGray
-
-              Start-Sleep -Seconds 10
-              $found = Get-ChildItem "$userDir\AppData" -Recurse -Filter "Telegram.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-              if ($found) {
-                $tgExe = $found.FullName
-                $wingetOk = $true
-                Write-Host "  [OK] Telegram installed via winget: $tgExe" -ForegroundColor Green
-              }
+              Invoke-WebRequest -Uri "https://telegram.org/dl/desktop/win64" -OutFile $tgInstaller -UseBasicParsing -ErrorAction Stop
+              $sizeMB = [math]::Round((Get-Item $tgInstaller).Length / 1MB, 2)
+              Write-Host "  [OK] Downloaded: $sizeMB MB" -ForegroundColor Green
             } catch {
-              Write-Host "  [WARN] winget failed: $_" -ForegroundColor Yellow
+              Write-Host "  [FAIL] Download failed: $_" -ForegroundColor Red
+              $global:LASTEXITCODE = 0
+              exit 0
             }
 
-            if (-not $wingetOk) {
-              Write-Host "  Falling back to manual download..." -ForegroundColor Cyan
-              $tgInstaller = "C:\telegram-setup.exe"
-              try {
-                Invoke-WebRequest -Uri "https://telegram.org/dl/desktop/win64" -OutFile $tgInstaller -UseBasicParsing -ErrorAction Stop
-                $sizeMB = [math]::Round((Get-Item $tgInstaller).Length / 1MB, 2)
-                Write-Host "  [OK] Downloaded: $sizeMB MB" -ForegroundColor Green
-              } catch {
-                Write-Host "  [FAIL] Download failed: $_" -ForegroundColor Red
-                $global:LASTEXITCODE = 0
-                exit 0
+            Write-Host "  Running installer (this may take 2-3 min)..." -ForegroundColor Cyan
+            $proc = Start-Process $tgInstaller `
+              -ArgumentList "/VERYSILENT", "/NORESTART", "/SUPPRESSMSGBOXES", "/NOCANCEL", "/SP-" `
+              -PassThru -Wait
+            Write-Host "  Installer exit code: $($proc.ExitCode)" -ForegroundColor Gray
+
+            Start-Sleep -Seconds 15
+            Remove-Item $tgInstaller -Force -ErrorAction SilentlyContinue
+
+            Write-Host ""
+            Write-Host "  Searching for Telegram.exe everywhere..." -ForegroundColor Cyan
+            foreach ($p in $possiblePaths) {
+              if (Test-Path $p) {
+                $tgExe = $p
+                Write-Host "  [OK] Found at: $p" -ForegroundColor Green
+                break
               }
+            }
 
-              Write-Host "  Running installer (this may take 1-2 min)..." -ForegroundColor Cyan
-              $proc = Start-Process $tgInstaller `
-                -ArgumentList "/VERYSILENT", "/NORESTART", "/SUPPRESSMSGBOXES", "/NOCANCEL", "/SP-" `
-                -PassThru -Wait
-              Write-Host "  Installer exit code: $($proc.ExitCode)" -ForegroundColor Gray
-
-              Start-Sleep -Seconds 5
-              Remove-Item $tgInstaller -Force -ErrorAction SilentlyContinue
-
-              $found = Get-ChildItem "$userDir\AppData" -Recurse -Filter "Telegram.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $tgExe) {
+              Write-Host "  Not in common paths - doing full search..." -ForegroundColor Yellow
+              $found = Get-ChildItem "C:\" -Recurse -Filter "Telegram.exe" -ErrorAction SilentlyContinue -Force | Select-Object -First 1
               if ($found) {
                 $tgExe = $found.FullName
-                Write-Host "  [OK] Telegram installed at: $tgExe" -ForegroundColor Green
-              } else {
-                Write-Host "  [FAIL] Telegram.exe not found after install" -ForegroundColor Red
-                $global:LASTEXITCODE = 0
-                exit 0
+                Write-Host "  [OK] Found at: $tgExe" -ForegroundColor Green
               }
             }
+          }
+
+          if (-not $tgExe) {
+            Write-Host "  [FAIL] Telegram.exe not found anywhere!" -ForegroundColor Red
+            Write-Host "  Listing AppData\\Roaming contents:" -ForegroundColor Yellow
+            Get-ChildItem "$userDir\AppData\Roaming" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "    - $($_.Name)" -ForegroundColor Gray
+            }
+            Write-Host "  Listing AppData\\Local contents:" -ForegroundColor Yellow
+            Get-ChildItem "$userDir\AppData\Local" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "    - $($_.Name)" -ForegroundColor Gray
+            }
+            Write-Host "  Listing Program Files contents:" -ForegroundColor Yellow
+            Get-ChildItem "C:\Program Files" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "    - $($_.Name)" -ForegroundColor Gray
+            }
+            $global:LASTEXITCODE = 0
+            exit 0
           }
 
           $shortcut = "$desktop\Telegram.lnk"
@@ -521,13 +559,9 @@ jobs:
           if (Test-Path $tgExe) {
             $sizeMB = [math]::Round((Get-Item $tgExe).Length / 1MB, 2)
             Write-Host "  Telegram.exe : $tgExe ($sizeMB MB)" -ForegroundColor Green
-          } else {
-            Write-Host "  Telegram.exe : NOT FOUND" -ForegroundColor Red
           }
           if (Test-Path $shortcut) {
             Write-Host "  Shortcut     : $shortcut" -ForegroundColor Green
-          } else {
-            Write-Host "  Shortcut     : NOT FOUND" -ForegroundColor Red
           }
           Write-Host ""
 
@@ -539,6 +573,7 @@ jobs:
         run: |
           $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
           $tsIP = & $tsExe ip -4 2>&1
+          $tsIP = "$tsIP".Trim()
 
           Write-Host ""
           Write-Host "  ======================================================" -ForegroundColor Green
@@ -580,6 +615,7 @@ jobs:
             if ($i % 5 -eq 0 -or $i -eq 1) {
               $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
               $tsIP = & $tsExe ip -4 2>&1
+              $tsIP = "$tsIP".Trim()
               Write-Host "  [$i/$totalMinutes] elapsed: $([math]::Floor($elapsed.TotalMinutes))min | remaining: ${h}h ${m}m | IP: $tsIP" -ForegroundColor Gray
             } else {
               Write-Host "  [$i/$totalMinutes] remaining: ${h}h ${m}m" -ForegroundColor DarkGray
