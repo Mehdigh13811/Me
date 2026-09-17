@@ -18,15 +18,12 @@ jobs:
     timeout-minutes: 355
 
     steps:
-      # ============================================================
-      # STEP 0: Welcome
-      # ============================================================
       - name: "Welcome"
         shell: pwsh
         run: |
           Write-Host ""
           Write-Host "  ======================================================" -ForegroundColor Cyan
-          Write-Host "         GITHUB WINDOWS RDP - v6.0" -ForegroundColor Cyan
+          Write-Host "         GITHUB WINDOWS RDP - v7.0" -ForegroundColor Cyan
           Write-Host "         Full Pre-flight Validation" -ForegroundColor Cyan
           Write-Host "  ======================================================" -ForegroundColor Cyan
           Write-Host ""
@@ -38,9 +35,6 @@ jobs:
       - name: "Checkout Repository"
         uses: actions/checkout@v4
 
-      # ============================================================
-      # STEP 1: Validate environment variables
-      # ============================================================
       - name: "[1/4] Validate Environment Variables"
         shell: pwsh
         run: |
@@ -118,9 +112,6 @@ jobs:
           Write-Host "  [1/4] All variables are valid" -ForegroundColor Green
           Write-Host ""
 
-      # ============================================================
-      # STEP 2: Backblaze B2 connectivity test
-      # ============================================================
       - name: "[2/4] Test Backblaze B2 Connection"
         shell: pwsh
         run: |
@@ -211,9 +202,6 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      # ============================================================
-      # STEP 3: Tailscale connectivity test
-      # ============================================================
       - name: "[3/4] Test Tailscale Connection"
         shell: pwsh
         run: |
@@ -314,9 +302,6 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      # ============================================================
-      # STEP 4: Pre-flight summary
-      # ============================================================
       - name: "[4/4] Pre-flight Summary"
         shell: pwsh
         run: |
@@ -333,9 +318,6 @@ jobs:
           Write-Host "  Time: $(Get-Date -Format 'HH:mm:ss')" -ForegroundColor Gray
           Write-Host ""
 
-      # ============================================================
-      # STEP 5: Enable RDP
-      # ============================================================
       - name: "Enable RDP"
         shell: pwsh
         run: |
@@ -356,9 +338,6 @@ jobs:
           }
           Write-Host ""
 
-      # ============================================================
-      # STEP 6: Setup Administrator account
-      # ============================================================
       - name: "Setup Administrator Account"
         shell: pwsh
         run: |
@@ -383,9 +362,6 @@ jobs:
           }
           Write-Host ""
 
-      # ============================================================
-      # STEP 7: Restore backup from B2
-      # ============================================================
       - name: "Restore Backup from B2"
         continue-on-error: true
         shell: pwsh
@@ -448,9 +424,6 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      # ============================================================
-      # STEP 8: Install Telegram Desktop
-      # ============================================================
       - name: "Install Telegram Desktop"
         continue-on-error: true
         shell: pwsh
@@ -458,52 +431,109 @@ jobs:
           Write-Host ""
           Write-Host "  -- Installing Telegram Desktop --" -ForegroundColor Cyan
 
-          $tgPath = "C:\Users\Administrator\AppData\Roaming\Telegram Desktop\Telegram.exe"
-          if (Test-Path $tgPath) {
-            Write-Host "  [OK] Telegram already installed" -ForegroundColor Green
-            $global:LASTEXITCODE = 0
-            exit 0
+          $userDir = "C:\Users\Administrator"
+          $desktop = "$userDir\Desktop"
+          $appDir  = "$userDir\AppData\Roaming\Telegram Desktop"
+          $tgExe   = "$appDir\Telegram.exe"
+
+          if (-not (Test-Path $desktop)) {
+            Write-Host "  Desktop folder missing - creating..." -ForegroundColor Yellow
+            New-Item -ItemType Directory -Path $desktop -Force | Out-Null
           }
 
-          Write-Host "  Downloading Telegram installer..." -ForegroundColor Cyan
-          $tgInstaller = "C:\telegram-setup.exe"
-          try {
-            Invoke-WebRequest -Uri "https://telegram.org/dl/desktop/win64" -OutFile $tgInstaller -UseBasicParsing -ErrorAction Stop
-            $sizeMB = [math]::Round((Get-Item $tgInstaller).Length / 1MB, 2)
-            Write-Host "  [OK] Downloaded: $sizeMB MB" -ForegroundColor Green
-          } catch {
-            Write-Host "  [FAIL] Download failed: $_" -ForegroundColor Red
-            $global:LASTEXITCODE = 0
-            exit 0
+          if (Test-Path $tgExe) {
+            Write-Host "  [OK] Telegram already installed at: $tgExe" -ForegroundColor Green
+          } else {
+            Write-Host "  Trying winget..." -ForegroundColor Cyan
+            $wingetOk = $false
+            try {
+              $wingetOut = & winget install --id Telegram.TelegramDesktop `
+                --accept-package-agreements --accept-source-agreements `
+                --silent --scope user 2>&1
+              Write-Host "  winget output:" -ForegroundColor Gray
+              Write-Host "  $wingetOut" -ForegroundColor DarkGray
+
+              Start-Sleep -Seconds 10
+              $found = Get-ChildItem "$userDir\AppData" -Recurse -Filter "Telegram.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($found) {
+                $tgExe = $found.FullName
+                $wingetOk = $true
+                Write-Host "  [OK] Telegram installed via winget: $tgExe" -ForegroundColor Green
+              }
+            } catch {
+              Write-Host "  [WARN] winget failed: $_" -ForegroundColor Yellow
+            }
+
+            if (-not $wingetOk) {
+              Write-Host "  Falling back to manual download..." -ForegroundColor Cyan
+              $tgInstaller = "C:\telegram-setup.exe"
+              try {
+                Invoke-WebRequest -Uri "https://telegram.org/dl/desktop/win64" -OutFile $tgInstaller -UseBasicParsing -ErrorAction Stop
+                $sizeMB = [math]::Round((Get-Item $tgInstaller).Length / 1MB, 2)
+                Write-Host "  [OK] Downloaded: $sizeMB MB" -ForegroundColor Green
+              } catch {
+                Write-Host "  [FAIL] Download failed: $_" -ForegroundColor Red
+                $global:LASTEXITCODE = 0
+                exit 0
+              }
+
+              Write-Host "  Running installer (this may take 1-2 min)..." -ForegroundColor Cyan
+              $proc = Start-Process $tgInstaller `
+                -ArgumentList "/VERYSILENT", "/NORESTART", "/SUPPRESSMSGBOXES", "/NOCANCEL", "/SP-" `
+                -PassThru -Wait
+              Write-Host "  Installer exit code: $($proc.ExitCode)" -ForegroundColor Gray
+
+              Start-Sleep -Seconds 5
+              Remove-Item $tgInstaller -Force -ErrorAction SilentlyContinue
+
+              $found = Get-ChildItem "$userDir\AppData" -Recurse -Filter "Telegram.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($found) {
+                $tgExe = $found.FullName
+                Write-Host "  [OK] Telegram installed at: $tgExe" -ForegroundColor Green
+              } else {
+                Write-Host "  [FAIL] Telegram.exe not found after install" -ForegroundColor Red
+                $global:LASTEXITCODE = 0
+                exit 0
+              }
+            }
           }
 
-          Write-Host "  Installing silently..." -ForegroundColor Cyan
-          try {
-            Start-Process $tgInstaller -ArgumentList "/VERYSILENT /NORESTART /SUPPRESSMSGBOXES /DIR=`"C:\Users\Administrator\AppData\Roaming\Telegram Desktop`"" -Wait
-            Start-Sleep -Seconds 10
-            Write-Host "  [OK] Telegram installed" -ForegroundColor Green
-          } catch {
-            Write-Host "  [WARN] Silent install may have failed: $_" -ForegroundColor Yellow
-          }
-
-          Remove-Item $tgInstaller -Force -ErrorAction SilentlyContinue
-
-          $desktopLnk = "C:\Users\Administrator\Desktop\Telegram.lnk"
-          if ((Test-Path $tgPath) -and (-not (Test-Path $desktopLnk))) {
-            $ws = New-Object -ComObject WScript.Shell
-            $sc = $ws.CreateShortcut($desktopLnk)
-            $sc.TargetPath = $tgPath
-            $sc.Save()
-            Write-Host "  [OK] Desktop shortcut created" -ForegroundColor Green
+          $shortcut = "$desktop\Telegram.lnk"
+          if (-not (Test-Path $shortcut)) {
+            Write-Host "  Creating desktop shortcut..." -ForegroundColor Cyan
+            try {
+              $ws = New-Object -ComObject WScript.Shell
+              $sc = $ws.CreateShortcut($shortcut)
+              $sc.TargetPath = $tgExe
+              $sc.WorkingDirectory = Split-Path $tgExe
+              $sc.IconLocation = "$tgExe,0"
+              $sc.Save()
+              Write-Host "  [OK] Shortcut created: $shortcut" -ForegroundColor Green
+            } catch {
+              Write-Host "  [WARN] Could not create shortcut: $_" -ForegroundColor Yellow
+            }
+          } else {
+            Write-Host "  [OK] Shortcut already exists" -ForegroundColor Green
           }
 
           Write-Host ""
+          Write-Host "  -- Verification --" -ForegroundColor Cyan
+          if (Test-Path $tgExe) {
+            $sizeMB = [math]::Round((Get-Item $tgExe).Length / 1MB, 2)
+            Write-Host "  Telegram.exe : $tgExe ($sizeMB MB)" -ForegroundColor Green
+          } else {
+            Write-Host "  Telegram.exe : NOT FOUND" -ForegroundColor Red
+          }
+          if (Test-Path $shortcut) {
+            Write-Host "  Shortcut     : $shortcut" -ForegroundColor Green
+          } else {
+            Write-Host "  Shortcut     : NOT FOUND" -ForegroundColor Red
+          }
+          Write-Host ""
+
           $global:LASTEXITCODE = 0
           exit 0
 
-      # ============================================================
-      # STEP 9: Display connection info
-      # ============================================================
       - name: "Connection Info"
         shell: pwsh
         run: |
@@ -528,9 +558,6 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      # ============================================================
-      # STEP 10: Keep Alive (5 hours)
-      # ============================================================
       - name: "Keep Server Alive (5 hours)"
         if: always()
         shell: pwsh
@@ -565,9 +592,6 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      # ============================================================
-      # STEP 11: Create backup zip
-      # ============================================================
       - name: "Create Backup Zip"
         if: always()
         continue-on-error: true
@@ -671,9 +695,6 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      # ============================================================
-      # STEP 12: Upload to B2
-      # ============================================================
       - name: "Upload Backup to B2"
         if: always()
         continue-on-error: true
@@ -719,9 +740,6 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      # ============================================================
-      # STEP 13: Final summary
-      # ============================================================
       - name: "Final Summary"
         if: always()
         shell: pwsh
