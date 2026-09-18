@@ -23,7 +23,7 @@ jobs:
         run: |
           Write-Host ""
           Write-Host "  ======================================================" -ForegroundColor Cyan
-          Write-Host "         GITHUB WINDOWS RDP - v13.0" -ForegroundColor Cyan
+          Write-Host "         GITHUB WINDOWS RDP - v13.1" -ForegroundColor Cyan
           Write-Host "         User: runneradmin" -ForegroundColor Cyan
           Write-Host "  ======================================================" -ForegroundColor Cyan
           Write-Host ""
@@ -362,15 +362,17 @@ jobs:
           }
           Remove-Item $backupZip -Force -ErrorAction SilentlyContinue
 
-          $userDesktop = "C:\Users\runneradmin\Desktop"
-          $restoredTg = "$userDesktop\Telegram"
-          if (Test-Path $restoredTg) {
-            Write-Host "  [OK] Telegram folder restored to Desktop" -ForegroundColor Green
-            $tdataPath = "$restoredTg\tdata"
-            if (Test-Path $tdataPath) {
-              $tdataSize = (Get-ChildItem $tdataPath -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-              Write-Host "  [OK] tdata: $([math]::Round($tdataSize/1MB,2)) MB" -ForegroundColor Green
+          # Restore Telegram tdata to Program Files (x86)
+          $tgDataRestored = "C:\Users\runneradmin\ProgramFiles_x86_Telegram\tdata"
+          $tgDataTarget = "C:\Program Files (x86)\Telegram\tdata"
+          if (Test-Path $tgDataRestored) {
+            Write-Host "  Restoring Telegram tdata to Program Files (x86)..." -ForegroundColor Cyan
+            if (-not (Test-Path "C:\Program Files (x86)\Telegram")) {
+              New-Item -ItemType Directory -Path "C:\Program Files (x86)\Telegram" -Force | Out-Null
             }
+            robocopy $tgDataRestored $tgDataTarget /E /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
+            Write-Host "  [OK] Telegram tdata restored" -ForegroundColor Green
+            $global:LASTEXITCODE = 0
           }
 
           $regFile = "C:\Users\runneradmin\Documents\_rdp-config\desktop-icons.reg"
@@ -385,31 +387,23 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "Setup Telegram on Desktop"
+      - name: "Setup Telegram in Program Files (x86)"
         continue-on-error: true
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  Setting up Telegram on Desktop..." -ForegroundColor Magenta
+          Write-Host "  Setting up Telegram in Program Files (x86)..." -ForegroundColor Magenta
           Write-Host ""
 
           $userDir = "C:\Users\runneradmin"
           $desktop = "$userDir\Desktop"
+          $tgDir = "C:\Program Files (x86)\Telegram"
+          $tgExe = "$tgDir\Telegram.exe"
+          $tgZip = "C:\telegram-portable.zip"
 
           if (-not (Test-Path $desktop)) {
             New-Item -ItemType Directory -Path $desktop -Force | Out-Null
           }
-
-          Write-Host "  Desktop path: $desktop" -ForegroundColor Gray
-          Write-Host "  Current Desktop contents:" -ForegroundColor Gray
-          Get-ChildItem $desktop -Force -ErrorAction SilentlyContinue | ForEach-Object {
-            Write-Host "    - $($_.Name)" -ForegroundColor DarkGray
-          }
-          Write-Host ""
-
-          $tgDir = "$desktop\Telegram"
-          $tgExe = "$tgDir\Telegram.exe"
-          $tgZip = "C:\telegram-portable.zip"
 
           if (Test-Path $tgExe) {
             Write-Host "  [OK] Telegram already exists at: $tgExe" -ForegroundColor Green
@@ -437,7 +431,7 @@ jobs:
               New-Item -ItemType Directory -Path $tgDir -Force | Out-Null
             }
 
-            Write-Host "  Extracting..." -ForegroundColor Cyan
+            Write-Host "  Extracting to $tgDir ..." -ForegroundColor Cyan
             try {
               Expand-Archive -Path $tgZip -DestinationPath $tgDir -Force -ErrorAction Stop
               Write-Host "  [OK] Extract successful" -ForegroundColor Green
@@ -461,9 +455,10 @@ jobs:
             }
           }
 
+          # Create shortcut on Desktop
           $shortcut = "$desktop\Telegram.lnk"
           if (-not (Test-Path $shortcut)) {
-            Write-Host "  Creating shortcut..." -ForegroundColor Cyan
+            Write-Host "  Creating shortcut on Desktop..." -ForegroundColor Cyan
             try {
               $ws = New-Object -ComObject WScript.Shell
               $sc = $ws.CreateShortcut($shortcut)
@@ -471,12 +466,12 @@ jobs:
               $sc.WorkingDirectory = Split-Path $tgExe
               $sc.IconLocation = "$tgExe,0"
               $sc.Save()
-              Write-Host "  [OK] Shortcut created" -ForegroundColor Green
+              Write-Host "  [OK] Shortcut created at $shortcut" -ForegroundColor Green
             } catch {
               Write-Host "  [WARN] Shortcut failed: $_" -ForegroundColor Yellow
             }
           } else {
-            Write-Host "  [OK] Shortcut exists" -ForegroundColor Green
+            Write-Host "  [OK] Shortcut already exists on Desktop" -ForegroundColor Green
           }
 
           Write-Host ""
@@ -513,14 +508,14 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "Keep Server Alive (5 hours)"
+      - name: "Keep Server Alive (5 minutes for test)"
         if: always()
         shell: pwsh
         run: |
-          Write-Host "  Keep Alive - 300 minutes" -ForegroundColor Cyan
+          Write-Host "  Keep Alive - 5 minutes (Test Mode)" -ForegroundColor Cyan
           Write-Host ""
 
-          $totalMinutes = 300
+          $totalMinutes = 5
           $startTime = Get-Date
 
           for ($i = 1; $i -le $totalMinutes; $i++) {
@@ -586,6 +581,20 @@ jobs:
           Copy-Folder "$userDir\Pictures"  "Pictures"
           Copy-Folder "$userDir\Videos"    "Videos"
 
+          # Backup Telegram tdata from Program Files (x86)
+          Write-Host "  Backing up Telegram tdata..." -ForegroundColor Gray
+          $tgDataSrc = "C:\Program Files (x86)\Telegram\tdata"
+          if (Test-Path $tgDataSrc) {
+            $tgDataDest = "$stage\ProgramFiles_x86_Telegram\tdata"
+            New-Item -ItemType Directory -Path $tgDataDest -Force | Out-Null
+            robocopy $tgDataSrc $tgDataDest /E /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
+            $size = (Get-ChildItem $tgDataDest -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+            Write-Host "    [OK] Telegram tdata: $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
+            $global:LASTEXITCODE = 0
+          } else {
+            Write-Host "    [SKIP] Telegram tdata not found (maybe not logged in yet)" -ForegroundColor DarkGray
+          }
+
           $chromeSrc = "$userDir\AppData\Local\Google\Chrome\User Data\Default"
           $chromeDst = "$stage\AppData\Local\Google\Chrome\User Data\Default"
           if (Test-Path $chromeSrc) {
@@ -615,16 +624,6 @@ jobs:
             Copy-Item $regFile "$regStage\desktop-icons.reg" -Force
           }
           $global:LASTEXITCODE = 0
-
-          Write-Host ""
-          Write-Host "  Checking Telegram tdata..." -ForegroundColor Cyan
-          $tdataCheck = "$userDir\Desktop\Telegram\tdata"
-          if (Test-Path $tdataCheck) {
-            $tdataSize = (Get-ChildItem $tdataCheck -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-            Write-Host "  [OK] tdata: $([math]::Round($tdataSize/1MB,2)) MB" -ForegroundColor Green
-          } else {
-            Write-Host "  [INFO] No tdata yet" -ForegroundColor Yellow
-          }
 
           Write-Host ""
           Write-Host "  Compressing..." -ForegroundColor Yellow
