@@ -21,7 +21,6 @@ jobs:
       - name: "Banner"
         shell: pwsh
         run: |
-          Write-Host "::group::Banner"
           $c = 'Cyan'
           $g = 'Gray'
           Write-Host ""
@@ -35,7 +34,6 @@ jobs:
           Write-Host "  Start    :  $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor $g
           Write-Host "  Hostname :  $env:COMPUTERNAME" -ForegroundColor $g
           Write-Host ""
-          Write-Host "::endgroup::"
 
       - name: "Checkout Repository"
         uses: actions/checkout@v4
@@ -43,7 +41,6 @@ jobs:
       - name: "[1/8]  Validate Configuration"
         shell: pwsh
         run: |
-          Write-Host "::group::[1/8] Validate Configuration"
           Write-Host ""
           Write-Host "  ┌─ Configuration Check ────────────────────────────────┐" -ForegroundColor Yellow
           Write-Host ""
@@ -75,25 +72,21 @@ jobs:
             Write-Host ""
             Write-Host "  └─ Failed: $($failed -join ', ')" -ForegroundColor Red
             Write-Host ""
-            Write-Host "::endgroup::"
             exit 1
           }
 
           if ($env:TAILSCALE_AUTHKEY -notmatch '^tskey-auth-') {
             Write-Host "    ✗  Tailscale AuthKey format invalid" -ForegroundColor Red
-            Write-Host "::endgroup::"
             exit 1
           }
 
           Write-Host ""
           Write-Host "  └─ All checks passed" -ForegroundColor Green
           Write-Host ""
-          Write-Host "::endgroup::"
 
       - name: "[2/8]  Prepare AWS CLI and Verify B2"
         shell: pwsh
         run: |
-          Write-Host "::group::[2/8] Prepare AWS CLI and Verify B2"
           Write-Host ""
           Write-Host "  ┌─ Storage Preparation ────────────────────────────────┐" -ForegroundColor Yellow
           Write-Host ""
@@ -109,7 +102,6 @@ jobs:
             Write-Host "    ✓  AWS CLI ready" -ForegroundColor Green
           } catch {
             Write-Host "    ✗  Install failed: $_" -ForegroundColor Red
-            Write-Host "::endgroup::"
             exit 1
           }
 
@@ -123,7 +115,6 @@ jobs:
           $head = & $aws s3api head-bucket --bucket $env:B2_BUCKET --endpoint-url $endpoint 2>&1
           if ($LASTEXITCODE -ne 0) {
             Write-Host "    ✗  Cannot access bucket: $head" -ForegroundColor Red
-            Write-Host "::endgroup::"
             exit 1
           }
           Write-Host "    ✓  Bucket accessible" -ForegroundColor Green
@@ -134,7 +125,6 @@ jobs:
           & $aws s3 cp $testFile "s3://$env:B2_BUCKET/_connectivity.txt" --endpoint-url $endpoint --no-progress 2>&1 | Out-Null
           if ($LASTEXITCODE -ne 0) {
             Write-Host "    ✗  No write access" -ForegroundColor Red
-            Write-Host "::endgroup::"
             exit 1
           }
           & $aws s3 rm "s3://$env:B2_BUCKET/_connectivity.txt" --endpoint-url $endpoint 2>&1 | Out-Null
@@ -153,7 +143,6 @@ jobs:
           Write-Host ""
           Write-Host "  └─ Storage ready" -ForegroundColor Green
           Write-Host ""
-          Write-Host "::endgroup::"
 
           $global:LASTEXITCODE = 0
           exit 0
@@ -161,7 +150,6 @@ jobs:
       - name: "[3/8]  Install and Connect Tailscale"
         shell: pwsh
         run: |
-          Write-Host "::group::[3/8] Install and Connect Tailscale"
           Write-Host ""
           Write-Host "  ┌─ Network Setup ──────────────────────────────────────┐" -ForegroundColor Yellow
           Write-Host ""
@@ -174,7 +162,6 @@ jobs:
             Write-Host "    ✓  Downloaded" -ForegroundColor Green
           } catch {
             Write-Host "    ✗  Download failed: $_" -ForegroundColor Red
-            Write-Host "::endgroup::"
             exit 1
           }
 
@@ -184,7 +171,6 @@ jobs:
           $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
           if (-not (Test-Path $tsExe)) {
             Write-Host "    ✗  Installation failed" -ForegroundColor Red
-            Write-Host "::endgroup::"
             exit 1
           }
           Write-Host "    ✓  Installed" -ForegroundColor Green
@@ -211,7 +197,6 @@ jobs:
           if (-not $connected) {
             Write-Host "    ✗  Connection failed" -ForegroundColor Red
             Write-Host "$(& $tsExe status 2>&1)" -ForegroundColor Gray
-            Write-Host "::endgroup::"
             exit 1
           }
 
@@ -222,15 +207,12 @@ jobs:
 
           "TAILSCALE_IP=$tsIP" | Out-File -FilePath "$env:GITHUB_ENV" -Append -Encoding utf8
 
-          Write-Host "::endgroup::"
-
           $global:LASTEXITCODE = 0
           exit 0
 
       - name: "[4/8]  Enable Remote Desktop"
         shell: pwsh
         run: |
-          Write-Host "::group::[4/8] Enable Remote Desktop"
           Write-Host ""
           Write-Host "  ┌─ Remote Desktop Setup ───────────────────────────────┐" -ForegroundColor Yellow
           Write-Host ""
@@ -250,12 +232,10 @@ jobs:
           Write-Host ""
           Write-Host "  └─ RDP ready" -ForegroundColor Green
           Write-Host ""
-          Write-Host "::endgroup::"
 
       - name: "[5/8]  Configure User Account"
         shell: pwsh
         run: |
-          Write-Host "::group::[5/8] Configure User Account"
           Write-Host ""
           Write-Host "  ┌─ User Account ───────────────────────────────────────┐" -ForegroundColor Yellow
           Write-Host ""
@@ -296,13 +276,11 @@ jobs:
 
           Write-Host "  └─ User ready" -ForegroundColor Green
           Write-Host ""
-          Write-Host "::endgroup::"
 
       - name: "[6/8]  Restore Environment from B2"
         continue-on-error: true
         shell: pwsh
         run: |
-          Write-Host "::group::[6/8] Restore Environment from B2"
           Write-Host ""
           Write-Host "  ┌─ Environment Restore ─────────────────────────────────┐" -ForegroundColor Yellow
           Write-Host ""
@@ -330,7 +308,6 @@ jobs:
               Write-Host "    ✓  Downloaded: $sizeMB MB" -ForegroundColor Green
             } catch {
               Write-Host "    ⚠  Download failed: $_" -ForegroundColor Yellow
-              Write-Host "::endgroup::"
               $global:LASTEXITCODE = 0
               exit 0
             }
@@ -354,7 +331,6 @@ jobs:
             Write-Host ""
             Write-Host "  └─ Restore skipped" -ForegroundColor Green
             Write-Host ""
-            Write-Host "::endgroup::"
             $global:LASTEXITCODE = 0
             exit 0
           }
@@ -374,7 +350,6 @@ jobs:
 
           if (-not $downloaded) {
             Write-Host "    ⚠  Download failed" -ForegroundColor Yellow
-            Write-Host "::endgroup::"
             $global:LASTEXITCODE = 0
             exit 0
           }
@@ -418,7 +393,6 @@ jobs:
           Write-Host ""
           Write-Host "  └─ Restore complete" -ForegroundColor Green
           Write-Host ""
-          Write-Host "::endgroup::"
 
           $global:LASTEXITCODE = 0
           exit 0
@@ -427,7 +401,6 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: |
-          Write-Host "::group::[7/8] Setup Telegram and Desktop"
           Write-Host ""
           Write-Host "  ┌─ Telegram and Desktop ────────────────────────────────┐" -ForegroundColor Yellow
           Write-Host ""
@@ -468,7 +441,6 @@ jobs:
 
               if (-not (Test-Path $tgZip) -or ((Get-Item $tgZip).Length -eq 0)) {
                 Write-Host "    ⚠  Download from B2 failed" -ForegroundColor Yellow
-                Write-Host "::endgroup::"
                 $global:LASTEXITCODE = 0
                 exit 0
               }
@@ -485,7 +457,6 @@ jobs:
                 Write-Host "    ✓  Extracted to temp" -ForegroundColor Green
               } catch {
                 Write-Host "    ⚠  Extract failed: $_" -ForegroundColor Yellow
-                Write-Host "::endgroup::"
                 $global:LASTEXITCODE = 0
                 exit 0
               }
@@ -495,7 +466,6 @@ jobs:
               if (-not $foundExe) {
                 Write-Host "    ⚠  Telegram.exe not found in archive" -ForegroundColor Yellow
                 Remove-Item $tgExtractTmp -Recurse -Force -ErrorAction SilentlyContinue
-                Write-Host "::endgroup::"
                 $global:LASTEXITCODE = 0
                 exit 0
               }
@@ -522,7 +492,6 @@ jobs:
 
           if (-not (Test-Path $tgExe)) {
             Write-Host "    ⚠  Telegram.exe not found" -ForegroundColor Yellow
-            Write-Host "::endgroup::"
             $global:LASTEXITCODE = 0
             exit 0
           }
@@ -582,7 +551,6 @@ jobs:
           Write-Host ""
           Write-Host "  └─ Setup complete" -ForegroundColor Green
           Write-Host ""
-          Write-Host "::endgroup::"
 
           $global:LASTEXITCODE = 0
           exit 0
@@ -591,7 +559,6 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: |
-          Write-Host "::group::[8/8] Apply Desktop Layout"
           Write-Host ""
           Write-Host "  ┌─ Desktop Layout ──────────────────────────────────────┐" -ForegroundColor Yellow
           Write-Host ""
@@ -626,7 +593,6 @@ jobs:
           Write-Host ""
           Write-Host "  └─ Layout applied" -ForegroundColor Green
           Write-Host ""
-          Write-Host "::endgroup::"
 
           $global:LASTEXITCODE = 0
           exit 0
@@ -634,7 +600,6 @@ jobs:
       - name: "Connection Information"
         shell: pwsh
         run: |
-          Write-Host "::group::Connection Information"
           $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
           $tsIP  = "$(& $tsExe ip -4 2>&1)".Trim()
 
@@ -652,7 +617,6 @@ jobs:
           Write-Host ""
           Write-Host "  Telegram shortcut is available on the Desktop." -ForegroundColor Yellow
           Write-Host ""
-          Write-Host "::endgroup::"
 
           $global:LASTEXITCODE = 0
           exit 0
@@ -661,7 +625,6 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          Write-Host "::group::Keep Alive (5 minutes)"
           Write-Host ""
           Write-Host "  ┌─ Keep Alive ──────────────────────────────────────────┐" -ForegroundColor Cyan
           Write-Host ""
@@ -685,7 +648,6 @@ jobs:
           Write-Host ""
           Write-Host "  └─ Keep Alive finished" -ForegroundColor Green
           Write-Host ""
-          Write-Host "::endgroup::"
 
           $global:LASTEXITCODE = 0
           exit 0
@@ -695,7 +657,6 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: |
-          Write-Host "::group::Create Backup"
           Write-Host ""
           Write-Host "  ┌─ Backup ──────────────────────────────────────────────┐" -ForegroundColor Magenta
           Write-Host ""
@@ -825,7 +786,6 @@ jobs:
           Write-Host ""
           Write-Host "  └─ Backup complete" -ForegroundColor Green
           Write-Host ""
-          Write-Host "::endgroup::"
 
           $global:LASTEXITCODE = 0
           exit 0
@@ -835,7 +795,6 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: |
-          Write-Host "::group::Upload Backup"
           Write-Host ""
           Write-Host "  ┌─ Upload ──────────────────────────────────────────────┐" -ForegroundColor Magenta
           Write-Host ""
@@ -846,7 +805,6 @@ jobs:
             Write-Host ""
             Write-Host "  └─ Upload skipped" -ForegroundColor Green
             Write-Host ""
-            Write-Host "::endgroup::"
             $global:LASTEXITCODE = 0
             exit 0
           }
@@ -881,7 +839,6 @@ jobs:
           Write-Host ""
           Write-Host "  └─ Upload complete" -ForegroundColor Green
           Write-Host ""
-          Write-Host "::endgroup::"
 
           $global:LASTEXITCODE = 0
           exit 0
@@ -890,7 +847,6 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          Write-Host "::group::Run Summary"
           Write-Host ""
           Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor Cyan
           Write-Host "  ║                    RUN SUMMARY                       ║" -ForegroundColor Cyan
@@ -899,4 +855,3 @@ jobs:
           Write-Host "  End Time  :  $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
           Write-Host "  Status    :  ${{ job.status }}" -ForegroundColor Gray
           Write-Host ""
-          Write-Host "::endgroup::"
