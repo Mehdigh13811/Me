@@ -359,8 +359,42 @@ jobs:
 
           Write-Host "    Extracting user data..." -ForegroundColor Cyan
           try {
-            Expand-Archive -Path $backupZip -DestinationPath "C:\Users\runneradmin" -Force -ErrorAction Stop
-            Write-Host "    ✓  Extracted to C:\Users\runneradmin" -ForegroundColor Green
+            $tempExtract = "C:\temp-extract"
+            if (Test-Path $tempExtract) { Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue }
+            Expand-Archive -Path $backupZip -DestinationPath $tempExtract -Force -ErrorAction Stop
+            Write-Host "    ✓  Extracted to temp" -ForegroundColor Green
+
+            $sourceUserDir = "$tempExtract"
+            $targetUserDir = "C:\Users\runneradmin"
+
+            $foldersToMove = @("Desktop", "Downloads", "Documents", "Pictures", "Videos")
+            foreach ($folder in $foldersToMove) {
+              if (Test-Path "$sourceUserDir\$folder") {
+                if (-not (Test-Path "$targetUserDir\$folder")) {
+                  New-Item -ItemType Directory -Path "$targetUserDir\$folder" -Force | Out-Null
+                }
+                Copy-Item -Path "$sourceUserDir\$folder\*" -Destination "$targetUserDir\$folder" -Recurse -Force -ErrorAction SilentlyContinue
+              }
+            }
+
+            $appDataSource = "$sourceUserDir\AppData"
+            $appDataTarget = "$targetUserDir\AppData"
+
+            if (Test-Path "$appDataSource\Local\Telegram\tdata") {
+              $tgTarget = "$appDataTarget\Local\Telegram\tdata"
+              if (-not (Test-Path $tgTarget)) { New-Item -ItemType Directory -Path $tgTarget -Force | Out-Null }
+              Copy-Item -Path "$appDataSource\Local\Telegram\tdata\*" -Destination $tgTarget -Recurse -Force -ErrorAction SilentlyContinue
+              Write-Host "    ✓  Telegram data restored" -ForegroundColor Green
+            }
+
+            if (Test-Path "$appDataSource\Local\Google\Chrome\User Data\Default") {
+              $chromeTarget = "$appDataTarget\Local\Google\Chrome\User Data\Default"
+              if (-not (Test-Path $chromeTarget)) { New-Item -ItemType Directory -Path $chromeTarget -Force | Out-Null }
+              Copy-Item -Path "$appDataSource\Local\Google\Chrome\User Data\Default\*" -Destination $chromeTarget -Recurse -Force -ErrorAction SilentlyContinue
+              Write-Host "    ✓  Chrome data restored" -ForegroundColor Green
+            }
+
+            Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
           } catch {
             Write-Host "    ⚠  Extract warning: $_" -ForegroundColor Yellow
           }
@@ -689,43 +723,37 @@ jobs:
 
           Write-Host "    User folders:" -ForegroundColor Cyan
           Copy-Folder "$userDir\Desktop"   "Desktop"
-          Copy-Folder "$userDir\Documents" "Documents"
           Copy-Folder "$userDir\Downloads" "Downloads"
-          Copy-Folder "$userDir\Pictures"  "Pictures"
-          Copy-Folder "$userDir\Videos"    "Videos"
 
           Write-Host ""
           Write-Host "    Application data:" -ForegroundColor Cyan
-          $tgSrc = "$userDir\AppData\Local\Telegram"
+
+          $tgSrc = "$userDir\AppData\Local\Telegram\tdata"
           if (Test-Path $tgSrc) {
-            $tgDest = "$stage\AppData\Local\Telegram"
+            $tgDest = "$stage\AppData\Local\Telegram\tdata"
             New-Item -ItemType Directory -Path $tgDest -Force | Out-Null
-            robocopy $tgSrc $tgDest /E `
-              /XD "cache" "temp" "user_data" "emoji" "webview" `
-              /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
+            robocopy $tgSrc $tgDest /E /XF "*.tmp" "*.log" "*.cache" /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
             $size = (Get-ChildItem $tgDest -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
             Write-Host "    ✓  Telegram     $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
-
-            $tdataCheck = "$tgDest\tdata"
-            if (Test-Path $tdataCheck) {
-              $tdataSize = (Get-ChildItem $tdataCheck -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-              Write-Host "    ✓  tdata        $([math]::Round($tdataSize/1MB,2)) MB" -ForegroundColor Green
-            }
             $global:LASTEXITCODE = 0
           } else {
             Write-Host "    ⓘ  Telegram     not found" -ForegroundColor DarkGray
           }
 
           $chromeSrc = "$userDir\AppData\Local\Google\Chrome\User Data\Default"
-          $chromeDst = "$stage\AppData\Local\Google\Chrome\User Data\Default"
           if (Test-Path $chromeSrc) {
+            $chromeDst = "$stage\AppData\Local\Google\Chrome\User Data\Default"
             New-Item -ItemType Directory -Path $chromeDst -Force | Out-Null
-            robocopy $chromeSrc $chromeDst /E `
-              /XD "Cache" "Code Cache" "GPUCache" "Service Worker" "Application Cache" "Media Cache" "GrShaderCache" "ShaderCache" `
-              /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
+            $chromeFiles = @("Bookmarks", "Login Data", "Preferences", "Web Data", "History", "Cookies", "Favicons")
+            foreach ($file in $chromeFiles) {
+              if (Test-Path "$chromeSrc\$file") {
+                Copy-Item "$chromeSrc\$file" "$chromeDst\$file" -Force -ErrorAction SilentlyContinue
+              }
+            }
             $size = (Get-ChildItem $chromeDst -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
             Write-Host "    ✓  Chrome       $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
-            $global:LASTEXITCODE = 0
+          } else {
+            Write-Host "    ⓘ  Chrome       not found" -ForegroundColor DarkGray
           }
 
           Write-Host ""
