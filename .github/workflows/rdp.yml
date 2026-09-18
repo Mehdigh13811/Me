@@ -23,9 +23,9 @@ jobs:
         run: |
           Write-Host ""
           Write-Host "  ======================================================" -ForegroundColor Cyan
-          Write-Host "         GITHUB WINDOWS RDP - v14.0" -ForegroundColor Cyan
+          Write-Host "         GITHUB WINDOWS RDP - v15.0" -ForegroundColor Cyan
           Write-Host "         User: runneradmin" -ForegroundColor Cyan
-          Write-Host "         Telegram: AppData\Local" -ForegroundColor Cyan
+          Write-Host "         Telegram: AppData\Local\Telegram" -ForegroundColor Cyan
           Write-Host "  ======================================================" -ForegroundColor Cyan
           Write-Host ""
           Write-Host "  Start time : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
@@ -363,11 +363,17 @@ jobs:
           }
           Remove-Item $backupZip -Force -ErrorAction SilentlyContinue
 
-          # Telegram is restored automatically to AppData\Local\Telegram (as part of user folder extraction)
+          # Verify Telegram
           $tgAppFolder = "C:\Users\runneradmin\AppData\Local\Telegram"
-          if (Test-Path $tgAppFolder) {
-            Write-Host "  [OK] Telegram restored to AppData\Local\Telegram" -ForegroundColor Green
-            $tdataPath = "$tgAppFolder\tdata"
+          $tgExe = "$tgAppFolder\Telegram.exe"
+          if (-not (Test-Path $tgExe)) {
+            $found = Get-ChildItem $tgAppFolder -Recurse -Filter "Telegram.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $tgExe = $found.FullName }
+          }
+
+          if (Test-Path $tgExe) {
+            Write-Host "  [OK] Telegram restored at: $tgExe" -ForegroundColor Green
+            $tdataPath = Join-Path (Split-Path $tgExe) "tdata"
             if (Test-Path $tdataPath) {
               $tdataSize = (Get-ChildItem $tdataPath -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
               Write-Host "  [OK] tdata: $([math]::Round($tdataSize/1MB,2)) MB" -ForegroundColor Green
@@ -396,86 +402,128 @@ jobs:
 
           $userDir = "C:\Users\runneradmin"
           $desktop = "$userDir\Desktop"
-          $tgDir = "$userDir\AppData\Local\Telegram"
-          $tgExe = "$tgDir\Telegram.exe"
+          $tgFinalDir = "$userDir\AppData\Local\Telegram"       # Final destination
+          $tgExe = "$tgFinalDir\Telegram.exe"
           $tgZip = "C:\telegram-portable.zip"
+          $tgExtractTemp = "C:\tg-temp-extract"
 
           if (-not (Test-Path $desktop)) {
             New-Item -ItemType Directory -Path $desktop -Force | Out-Null
           }
 
+          # If Telegram already exists at correct path, skip download
           if (Test-Path $tgExe) {
             Write-Host "  [OK] Telegram already exists at: $tgExe" -ForegroundColor Green
           } else {
-            Write-Host "  Downloading Telegram from B2..." -ForegroundColor Cyan
+            # Check if there is a nested Telegram folder from previous run
+            $nested = "$tgFinalDir\Telegram\Telegram.exe"
+            if (Test-Path $nested) {
+              Write-Host "  [INFO] Found nested Telegram folder - fixing structure..." -ForegroundColor Yellow
+              Write-Host "  Moving contents from $tgFinalDir\Telegram to $tgFinalDir ..." -ForegroundColor Cyan
+              $nestedDir = "$tgFinalDir\Telegram"
+              Get-ChildItem -Path $nestedDir -Force | ForEach-Object {
+                Move-Item -Path $_.FullName -Destination $tgFinalDir -Force
+              }
+              Remove-Item $nestedDir -Force -Recurse -ErrorAction SilentlyContinue
+              Write-Host "  [OK] Structure fixed" -ForegroundColor Green
+            } else {
+              Write-Host "  Downloading Telegram from B2..." -ForegroundColor Cyan
 
-            $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
-            $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
-            $env:AWS_DEFAULT_REGION    = $env:B2_REGION
-            $aws = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
-            $endpoint = "https://$env:B2_ENDPOINT"
+              $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
+              $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
+              $env:AWS_DEFAULT_REGION    = $env:B2_REGION
+              $aws = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
+              $endpoint = "https://$env:B2_ENDPOINT"
 
-            & $aws s3 cp "s3://$env:B2_BUCKET/telegram-portable.zip" $tgZip --endpoint-url $endpoint --no-progress
+              & $aws s3 cp "s3://$env:B2_BUCKET/telegram-portable.zip" $tgZip --endpoint-url $endpoint --no-progress
 
-            if (-not (Test-Path $tgZip) -or ((Get-Item $tgZip).Length -eq 0)) {
-              Write-Host "  [FAIL] Could not download from B2" -ForegroundColor Red
-              $global:LASTEXITCODE = 0
-              exit 0
-            }
-
-            $sizeMB = [math]::Round((Get-Item $tgZip).Length / 1MB, 2)
-            Write-Host "  [OK] Downloaded: $sizeMB MB" -ForegroundColor Green
-
-            if (-not (Test-Path $tgDir)) {
-              New-Item -ItemType Directory -Path $tgDir -Force | Out-Null
-            }
-
-            Write-Host "  Extracting to $tgDir ..." -ForegroundColor Cyan
-            try {
-              Expand-Archive -Path $tgZip -DestinationPath $tgDir -Force -ErrorAction Stop
-              Write-Host "  [OK] Extract successful" -ForegroundColor Green
-            } catch {
-              Write-Host "  [FAIL] Extract failed: $_" -ForegroundColor Red
-              $global:LASTEXITCODE = 0
-              exit 0
-            }
-            Remove-Item $tgZip -Force -ErrorAction SilentlyContinue
-
-            if (-not (Test-Path $tgExe)) {
-              $found = Get-ChildItem $tgDir -Recurse -Filter "Telegram.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-              if ($found) {
-                $tgExe = $found.FullName
-                Write-Host "  [OK] Found at: $tgExe" -ForegroundColor Green
-              } else {
-                Write-Host "  [FAIL] Telegram.exe not found" -ForegroundColor Red
+              if (-not (Test-Path $tgZip) -or ((Get-Item $tgZip).Length -eq 0)) {
+                Write-Host "  [FAIL] Could not download from B2" -ForegroundColor Red
                 $global:LASTEXITCODE = 0
                 exit 0
               }
+
+              $sizeMB = [math]::Round((Get-Item $tgZip).Length / 1MB, 2)
+              Write-Host "  [OK] Downloaded: $sizeMB MB" -ForegroundColor Green
+
+              # Extract to temp folder first
+              if (Test-Path $tgExtractTemp) { Remove-Item $tgExtractTemp -Recurse -Force }
+              New-Item -ItemType Directory -Path $tgExtractTemp -Force | Out-Null
+
+              Write-Host "  Extracting to temp folder..." -ForegroundColor Cyan
+              try {
+                Expand-Archive -Path $tgZip -DestinationPath $tgExtractTemp -Force -ErrorAction Stop
+                Write-Host "  [OK] Extracted to temp" -ForegroundColor Green
+              } catch {
+                Write-Host "  [FAIL] Extract failed: $_" -ForegroundColor Red
+                $global:LASTEXITCODE = 0
+                exit 0
+              }
+              Remove-Item $tgZip -Force -ErrorAction SilentlyContinue
+
+              # Find Telegram.exe in extracted folder
+              $foundExe = Get-ChildItem $tgExtractTemp -Recurse -Filter "Telegram.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+              if (-not $foundExe) {
+                Write-Host "  [FAIL] Telegram.exe not found in archive" -ForegroundColor Red
+                Remove-Item $tgExtractTemp -Recurse -Force -ErrorAction SilentlyContinue
+                $global:LASTEXITCODE = 0
+                exit 0
+              }
+
+              $sourceDir = $foundExe.Directory.FullName
+              Write-Host "  Source dir: $sourceDir" -ForegroundColor Gray
+
+              # Copy contents of the source folder (where Telegram.exe is) to final dir
+              # So Telegram.exe ends up at $tgFinalDir\Telegram.exe
+              if (-not (Test-Path $tgFinalDir)) {
+                New-Item -ItemType Directory -Path $tgFinalDir -Force | Out-Null
+              }
+
+              Write-Host "  Moving files to $tgFinalDir ..." -ForegroundColor Cyan
+              Get-ChildItem -Path $sourceDir -Force | ForEach-Object {
+                Move-Item -Path $_.FullName -Destination $tgFinalDir -Force
+              }
+
+              Remove-Item $tgExtractTemp -Recurse -Force -ErrorAction SilentlyContinue
+              Write-Host "  [OK] Telegram installed at: $tgFinalDir" -ForegroundColor Green
             }
           }
 
-          # Create shortcut on Desktop
+          # Ensure Telegram.exe exists now
+          if (-not (Test-Path $tgExe)) {
+            $found = Get-ChildItem $tgFinalDir -Recurse -Filter "Telegram.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $tgExe = $found.FullName }
+          }
+
+          if (-not (Test-Path $tgExe)) {
+            Write-Host "  [FAIL] Telegram.exe not found at expected location" -ForegroundColor Red
+            $global:LASTEXITCODE = 0
+            exit 0
+          }
+
+          # Create/update shortcut on Desktop
           $shortcut = "$desktop\Telegram.lnk"
-          if (-not (Test-Path $shortcut)) {
-            Write-Host "  Creating shortcut on Desktop..." -ForegroundColor Cyan
-            try {
-              $ws = New-Object -ComObject WScript.Shell
-              $sc = $ws.CreateShortcut($shortcut)
-              $sc.TargetPath = $tgExe
-              $sc.WorkingDirectory = Split-Path $tgExe
-              $sc.IconLocation = "$tgExe,0"
-              $sc.Save()
-              Write-Host "  [OK] Shortcut created at $shortcut" -ForegroundColor Green
-            } catch {
-              Write-Host "  [WARN] Shortcut failed: $_" -ForegroundColor Yellow
-            }
-          } else {
-            Write-Host "  [OK] Shortcut already exists on Desktop" -ForegroundColor Green
+          Write-Host "  Creating shortcut pointing to: $tgExe" -ForegroundColor Cyan
+          try {
+            $ws = New-Object -ComObject WScript.Shell
+            $sc = $ws.CreateShortcut($shortcut)
+            $sc.TargetPath = $tgExe
+            $sc.WorkingDirectory = Split-Path $tgExe
+            $sc.IconLocation = "$tgExe,0"
+            $sc.Save()
+            Write-Host "  [OK] Shortcut created at $shortcut" -ForegroundColor Green
+          } catch {
+            Write-Host "  [WARN] Shortcut failed: $_" -ForegroundColor Yellow
           }
 
           Write-Host ""
           Write-Host "  -- Final Desktop contents --" -ForegroundColor Cyan
           Get-ChildItem $desktop -Force -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "    - $($_.Name)" -ForegroundColor White
+          }
+          Write-Host ""
+          Write-Host "  -- Telegram folder contents --" -ForegroundColor Cyan
+          Get-ChildItem $tgFinalDir -Force -ErrorAction SilentlyContinue | ForEach-Object {
             Write-Host "    - $($_.Name)" -ForegroundColor White
           }
           Write-Host ""
@@ -502,7 +550,6 @@ jobs:
           Write-Host "  ------------------------------------------------------" -ForegroundColor Cyan
           Write-Host ""
           Write-Host "  Telegram is on Desktop - click to open" -ForegroundColor Yellow
-          Write-Host "  Telegram installed in: AppData\Local\Telegram" -ForegroundColor Gray
           Write-Host ""
 
           $global:LASTEXITCODE = 0
@@ -581,7 +628,7 @@ jobs:
           Copy-Folder "$userDir\Pictures"  "Pictures"
           Copy-Folder "$userDir\Videos"    "Videos"
 
-          # Backup Telegram from AppData\Local (only tdata + essential files, exclude cache)
+          # Backup Telegram from AppData\Local (exclude cache)
           Write-Host "  Backing up Telegram from AppData\Local..." -ForegroundColor Gray
           $tgSrc = "$userDir\AppData\Local\Telegram"
           if (Test-Path $tgSrc) {
@@ -600,7 +647,7 @@ jobs:
             }
             $global:LASTEXITCODE = 0
           } else {
-            Write-Host "    [SKIP] Telegram folder not found (maybe not installed yet)" -ForegroundColor DarkGray
+            Write-Host "    [SKIP] Telegram folder not found" -ForegroundColor DarkGray
           }
 
           $chromeSrc = "$userDir\AppData\Local\Google\Chrome\User Data\Default"
