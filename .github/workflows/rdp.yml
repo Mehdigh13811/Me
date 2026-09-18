@@ -6,8 +6,8 @@ on:
 env:
   RDP_PASSWORD: 'P@ssw0rd!2024'
   TAILSCALE_AUTHKEY: "tskey-auth-kM5gcJDL9B21CNTRL-dBrSevCy22avgAJ5j2kS2aviVpoQNKrF"
-  B2_KEY_ID: "0047c90ff6f40880000000003"
-  B2_APP_KEY: "K004GCg17BSNz0haTg+BN6lCp0k2/1o"
+  B2_KEY_ID: "0047c90ff6f40880000000004"
+  B2_APP_KEY: "K004OUjaIIV87GKhw9a84J27Yj/U5ec"
   B2_BUCKET: "my-files-backup-forrdp"
   B2_ENDPOINT: "s3.us-west-004.backblazeb2.com"
   B2_REGION: "us-west-004"
@@ -338,16 +338,9 @@ jobs:
           $backupZip  = "C:\userdata.zip"
           $downloaded = $false
 
-          for ($attempt = 1; $attempt -le 5; $attempt++) {
-            Write-Host "      attempt $attempt/5 ..." -ForegroundColor DarkGray
-            try {
-              $presignedUrl = & $aws s3 presign "s3://$env:B2_BUCKET/userdata.zip" --endpoint-url $endpoint --expires-in 3600 2>&1 | Select-Object -Last 1
-              if ($presignedUrl -and $presignedUrl -match '^https?://') {
-                Invoke-WebRequest -Uri $presignedUrl.Trim() -OutFile $backupZip -UseBasicParsing -ErrorAction Stop
-              }
-            } catch {
-              Write-Host "        $($_.Exception.Message)" -ForegroundColor DarkGray
-            }
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            Write-Host "      attempt $attempt/3 ..." -ForegroundColor DarkGray
+            & $aws s3 cp "s3://$env:B2_BUCKET/userdata.zip" $backupZip --endpoint-url $endpoint --no-progress 2>&1 | Out-Null
             if ((Test-Path $backupZip) -and ((Get-Item $backupZip).Length -gt 0)) {
               $downloaded = $true
               break
@@ -446,16 +439,9 @@ jobs:
 
               if (Test-Path $tgZip) { Remove-Item $tgZip -Force -ErrorAction SilentlyContinue }
 
-              for ($attempt = 1; $attempt -le 5; $attempt++) {
-                Write-Host "      attempt $attempt/5 ..." -ForegroundColor DarkGray
-                try {
-                  $presignedUrl = & $aws s3 presign "s3://$env:B2_BUCKET/telegram-portable.zip" --endpoint-url $endpoint --expires-in 3600 2>&1 | Select-Object -Last 1
-                  if ($presignedUrl -and $presignedUrl -match '^https?://') {
-                    Invoke-WebRequest -Uri $presignedUrl.Trim() -OutFile $tgZip -UseBasicParsing -ErrorAction Stop
-                  }
-                } catch {
-                  Write-Host "        $($_.Exception.Message)" -ForegroundColor DarkGray
-                }
+              for ($attempt = 1; $attempt -le 3; $attempt++) {
+                Write-Host "      attempt $attempt/3 ..." -ForegroundColor DarkGray
+                & $aws s3 cp "s3://$env:B2_BUCKET/telegram-portable.zip" $tgZip --endpoint-url $endpoint --no-progress 2>&1 | Out-Null
                 if ((Test-Path $tgZip) -and ((Get-Item $tgZip).Length -gt 0)) { break }
                 Start-Sleep -Seconds 10
               }
