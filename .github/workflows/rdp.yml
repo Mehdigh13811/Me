@@ -28,7 +28,6 @@ jobs:
           Write-Host "  ║           GITHUB WINDOWS RDP SERVER  v16.0           ║" -ForegroundColor $c
           Write-Host "  ╠══════════════════════════════════════════════════════╣" -ForegroundColor $c
           Write-Host "  ║   User      :  runneradmin                           ║" -ForegroundColor $c
-          Write-Host "  ║   Telegram  :  AppData\Local\Telegram                ║" -ForegroundColor $c
           Write-Host "  ║   Storage   :  Backblaze B2                          ║" -ForegroundColor $c
           Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor $c
           Write-Host ""
@@ -509,6 +508,32 @@ jobs:
             Write-Host "    ✓  Shortcut created" -ForegroundColor Green
           } catch {
             Write-Host "    ⚠  Shortcut failed: $_" -ForegroundColor Yellow
+          }
+
+          Write-Host ""
+          Write-Host "    Cleaning up default desktop shortcuts..." -ForegroundColor Cyan
+          $removeIcons = @(
+            "Unity Hub.lnk",
+            "Firefox.lnk",
+            "Microsoft Edge.lnk",
+            "R 4.6.1.lnk"
+          )
+
+          $desktopPaths = @(
+            "C:\Users\Public\Desktop",
+            "C:\Users\runneradmin\Desktop"
+          )
+
+          foreach ($path in $desktopPaths) {
+            if (Test-Path $path) {
+              foreach ($icon in $removeIcons) {
+                $iconPath = Join-Path $path $icon
+                if (Test-Path $iconPath) {
+                  Remove-Item $iconPath -Force -ErrorAction SilentlyContinue
+                  Write-Host "      ✓  Removed: $icon" -ForegroundColor Green
+                }
+              }
+            }
           }
 
           Write-Host ""
