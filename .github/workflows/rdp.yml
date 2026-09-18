@@ -11,6 +11,8 @@ env:
   B2_BUCKET: "my-files-backup-forrdp"
   B2_ENDPOINT: "s3.us-west-004.backblazeb2.com"
   B2_REGION: "us-west-004"
+  AWS_REQUEST_CHECKSUM_CALCULATION: "when_required"
+  AWS_RESPONSE_CHECKSUM_VALIDATION: "when_required"
 
 jobs:
   build:
@@ -288,6 +290,8 @@ jobs:
           $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
           $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
           $env:AWS_DEFAULT_REGION    = $env:B2_REGION
+          $env:AWS_REQUEST_CHECKSUM_CALCULATION = "when_required"
+          $env:AWS_RESPONSE_CHECKSUM_VALIDATION = "when_required"
           $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
           $endpoint = "https://$env:B2_ENDPOINT"
 
@@ -338,9 +342,11 @@ jobs:
           $backupZip  = "C:\userdata.zip"
           $downloaded = $false
 
+          if (Test-Path $backupZip) { Remove-Item $backupZip -Force -ErrorAction SilentlyContinue }
+
           for ($attempt = 1; $attempt -le 3; $attempt++) {
             Write-Host "      attempt $attempt/3 ..." -ForegroundColor DarkGray
-            & $aws s3 cp "s3://$env:B2_BUCKET/userdata.zip" $backupZip --endpoint-url $endpoint --no-progress 2>&1 | Out-Null
+            & $aws s3 cp "s3://$env:B2_BUCKET/userdata.zip" $backupZip --endpoint-url $endpoint --no-progress --only-show-errors 2>&1 | ForEach-Object { Write-Host "        $_" -ForegroundColor DarkGray }
             if ((Test-Path $backupZip) -and ((Get-Item $backupZip).Length -gt 0)) {
               $downloaded = $true
               break
@@ -434,6 +440,8 @@ jobs:
               $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
               $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
               $env:AWS_DEFAULT_REGION    = $env:B2_REGION
+              $env:AWS_REQUEST_CHECKSUM_CALCULATION = "when_required"
+              $env:AWS_RESPONSE_CHECKSUM_VALIDATION = "when_required"
               $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
               $endpoint = "https://$env:B2_ENDPOINT"
 
@@ -441,7 +449,7 @@ jobs:
 
               for ($attempt = 1; $attempt -le 3; $attempt++) {
                 Write-Host "      attempt $attempt/3 ..." -ForegroundColor DarkGray
-                & $aws s3 cp "s3://$env:B2_BUCKET/telegram-portable.zip" $tgZip --endpoint-url $endpoint --no-progress 2>&1 | Out-Null
+                & $aws s3 cp "s3://$env:B2_BUCKET/telegram-portable.zip" $tgZip --endpoint-url $endpoint --no-progress --only-show-errors 2>&1 | ForEach-Object { Write-Host "        $_" -ForegroundColor DarkGray }
                 if ((Test-Path $tgZip) -and ((Get-Item $tgZip).Length -gt 0)) { break }
                 Start-Sleep -Seconds 10
               }
@@ -824,6 +832,8 @@ jobs:
           $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
           $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
           $env:AWS_DEFAULT_REGION    = $env:B2_REGION
+          $env:AWS_REQUEST_CHECKSUM_CALCULATION = "when_required"
+          $env:AWS_RESPONSE_CHECKSUM_VALIDATION = "when_required"
           $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
           $endpoint = "https://$env:B2_ENDPOINT"
 
