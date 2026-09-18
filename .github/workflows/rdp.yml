@@ -25,7 +25,7 @@ jobs:
           $g = 'Gray'
           Write-Host ""
           Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor $c
-          Write-Host "  ║           GITHUB WINDOWS RDP SERVER  v16.0           ║" -ForegroundColor $c
+          Write-Host "  ║           GITHUB WINDOWS RDP SERVER  v16.1           ║" -ForegroundColor $c
           Write-Host "  ╠══════════════════════════════════════════════════════╣" -ForegroundColor $c
           Write-Host "  ║   User      :  runneradmin                           ║" -ForegroundColor $c
           Write-Host "  ║   Storage   :  Backblaze B2                          ║" -ForegroundColor $c
@@ -655,7 +655,7 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "Keep Alive (5 minutes)"
+      - name: "Keep Alive (5 hours 25 minutes)"
         if: always()
         shell: pwsh
         run: |
@@ -663,14 +663,14 @@ jobs:
           Write-Host "  ┌─ Keep Alive ──────────────────────────────────────────┐" -ForegroundColor Cyan
           Write-Host ""
 
-          $totalMinutes = 5
+          $totalMinutes = 325
           for ($i = 1; $i -le $totalMinutes; $i++) {
             Start-Sleep -Seconds 60
             $remaining = $totalMinutes - $i
             $h = [math]::Floor($remaining / 60)
             $m = $remaining % 60
 
-            if ($i % 1 -eq 0 -or $i -eq 1) {
+            if ($i % 30 -eq 0 -or $i -eq 1) {
               $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
               $tsIP  = "$(& $tsExe ip -4 2>&1)".Trim()
               Write-Host "    [$i/$totalMinutes]  remaining: ${h}h ${m}m   IP: $tsIP" -ForegroundColor Gray
@@ -695,6 +695,29 @@ jobs:
           Write-Host "  ┌─ Backup ──────────────────────────────────────────────┐" -ForegroundColor Magenta
           Write-Host ""
 
+          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+          if (-not (Test-Path $sevenZip)) {
+            Write-Host "    Installing 7-Zip..." -ForegroundColor Cyan
+            $7zInstaller = "$env:TEMP\7z-installer.exe"
+            try {
+              Invoke-WebRequest "https://www.7-zip.org/a/7z2408-x64.exe" -OutFile $7zInstaller -UseBasicParsing -ErrorAction Stop
+              Start-Process $7zInstaller -ArgumentList "/S" -Wait
+              Start-Sleep -Seconds 8
+            } catch {
+              Write-Host "    ⚠  7-Zip install failed: $_" -ForegroundColor Yellow
+            }
+          }
+
+          if (-not (Test-Path $sevenZip)) {
+            Write-Host "    ⚠  7-Zip not available — cannot create backup" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "  └─ Backup aborted" -ForegroundColor Yellow
+            Write-Host ""
+            $global:LASTEXITCODE = 0
+            exit 0
+          }
+          Write-Host "    ✓  7-Zip ready" -ForegroundColor Green
+
           $userDir = "C:\Users\runneradmin"
           $stage   = "C:\backup-stage"
           $zipPath = "C:\userdata.zip"
@@ -713,12 +736,12 @@ jobs:
               } else {
                 robocopy $Source $dest /E /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
               }
+              $global:LASTEXITCODE = 0
               $size = (Get-ChildItem $dest -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
               Write-Host "    ✓  $($DestName.PadRight(12)) $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
             } else {
               Write-Host "    ⓘ  $($DestName.PadRight(12)) not found" -ForegroundColor DarkGray
             }
-            $global:LASTEXITCODE = 0
           }
 
           Write-Host "    User folders:" -ForegroundColor Cyan
@@ -733,9 +756,9 @@ jobs:
             $tgDest = "$stage\AppData\Local\Telegram\tdata"
             New-Item -ItemType Directory -Path $tgDest -Force | Out-Null
             robocopy $tgSrc $tgDest /E /XF "*.tmp" "*.log" "*.cache" /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
+            $global:LASTEXITCODE = 0
             $size = (Get-ChildItem $tgDest -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
             Write-Host "    ✓  Telegram     $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
-            $global:LASTEXITCODE = 0
           } else {
             Write-Host "    ⓘ  Telegram     not found" -ForegroundColor DarkGray
           }
@@ -793,20 +816,18 @@ jobs:
           $global:LASTEXITCODE = 0
 
           Write-Host ""
-          Write-Host "    Compressing archive..." -ForegroundColor Cyan
-          Compress-Archive -Path "$stage\*" -DestinationPath $zipPath -Force -CompressionLevel Optimal -ErrorAction SilentlyContinue
+          Write-Host "    Compressing with 7-Zip (fastest mode)..." -ForegroundColor Cyan
+          $sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+          & $sevenZip a -tzip -mx=1 -mmt=on $zipPath "$stage\*" | Out-Null
+          $global:LASTEXITCODE = 0
+          $sw.Stop()
 
           if (Test-Path $zipPath) {
-            $zipGB = [math]::Round((Get-Item $zipPath).Length / 1GB, 3)
-            Write-Host "    ✓  Archive created: $zipGB GB" -ForegroundColor Green
-
-            if ($zipGB -gt 10) {
-              Write-Host "    ⚠  Over 10 GB — removing Downloads" -ForegroundColor Yellow
-              Remove-Item "$stage\Downloads" -Recurse -Force -ErrorAction SilentlyContinue
-              Remove-Item $zipPath -Force
-              Compress-Archive -Path "$stage\*" -DestinationPath $zipPath -Force -CompressionLevel Optimal
-              Write-Host "    ✓  New size: $([math]::Round((Get-Item $zipPath).Length/1GB,3)) GB" -ForegroundColor Green
-            }
+            $zipMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
+            Write-Host "    ✓  Compressed in $([math]::Round($sw.Elapsed.TotalSeconds,1))s  →  $zipMB MB" -ForegroundColor Green
+          } else {
+            Write-Host "    ✗  Compression failed" -ForegroundColor Red
           }
 
           Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
