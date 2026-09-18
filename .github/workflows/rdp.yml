@@ -38,7 +38,7 @@ jobs:
       - name: "Checkout Repository"
         uses: actions/checkout@v4
 
-      - name: "[1/8]  Validate Configuration"
+      - name: "[1/9]  Validate Configuration"
         shell: pwsh
         run: |
           Write-Host ""
@@ -84,7 +84,7 @@ jobs:
           Write-Host "  └─ All checks passed" -ForegroundColor Green
           Write-Host ""
 
-      - name: "[2/8]  Prepare AWS CLI and Verify B2"
+      - name: "[2/9]  Prepare AWS CLI and Verify B2"
         shell: pwsh
         run: |
           Write-Host ""
@@ -147,7 +147,7 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "[3/8]  Install and Connect Tailscale"
+      - name: "[3/9]  Install and Connect Tailscale"
         shell: pwsh
         run: |
           Write-Host ""
@@ -210,7 +210,7 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "[4/8]  Enable Remote Desktop"
+      - name: "[4/9]  Enable Remote Desktop"
         shell: pwsh
         run: |
           Write-Host ""
@@ -233,7 +233,7 @@ jobs:
           Write-Host "  └─ RDP ready" -ForegroundColor Green
           Write-Host ""
 
-      - name: "[5/8]  Configure User Account"
+      - name: "[5/9]  Configure User Account"
         shell: pwsh
         run: |
           Write-Host ""
@@ -277,7 +277,41 @@ jobs:
           Write-Host "  └─ User ready" -ForegroundColor Green
           Write-Host ""
 
-      - name: "[6/8]  Restore Environment from B2"
+      - name: "[6/9]  Install 7-Zip"
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "  ┌─ 7-Zip Install ──────────────────────────────────────┐" -ForegroundColor Yellow
+          Write-Host ""
+
+          $sevenZipExe = "C:\Program Files\7-Zip\7z.exe"
+          if (Test-Path $sevenZipExe) {
+            Write-Host "    ✓  7-Zip already installed" -ForegroundColor Green
+          } else {
+            Write-Host "    Installing 7-Zip..." -ForegroundColor Cyan
+            $sevenZipMsi = "$env:TEMP\7z-installer.msi"
+            try {
+              Invoke-WebRequest -Uri "https://www.7-zip.org/a/7z2301-x64.msi" -OutFile $sevenZipMsi -UseBasicParsing -ErrorAction Stop
+              Start-Process msiexec.exe -ArgumentList "/i $sevenZipMsi /quiet /norestart" -Wait
+              Start-Sleep -Seconds 5
+              Write-Host "    ✓  7-Zip installed" -ForegroundColor Green
+            } catch {
+              Write-Host "    ✗  Install failed: $_" -ForegroundColor Red
+              exit 1
+            }
+          }
+
+          if (-not (Test-Path $sevenZipExe)) {
+            Write-Host "    ✗  7z.exe not found" -ForegroundColor Red
+            exit 1
+          }
+
+          Write-Host "    ✓  7z.exe ready: $sevenZipExe" -ForegroundColor Green
+          Write-Host ""
+          Write-Host "  └─ 7-Zip ready" -ForegroundColor Green
+          Write-Host ""
+
+      - name: "[7/9]  Restore Environment from B2"
         continue-on-error: true
         shell: pwsh
         run: |
@@ -291,15 +325,46 @@ jobs:
           $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
           $endpoint = "https://$env:B2_ENDPOINT"
 
+          Write-Host "    Listing remote objects..." -ForegroundColor Cyan
+          $remoteObjects = & $aws s3api list-objects-v2 --bucket $env:B2_BUCKET --endpoint-url $endpoint --query "Contents[].Key" --output text 2>&1
+          $remoteKeys = @()
+          if ($remoteObjects -and $LASTEXITCODE -eq 0) {
+            $remoteKeys = ($remoteObjects -split '\s+' | Where-Object { $_ -and $_ -ne 'None' })
+            foreach ($k in $remoteKeys) {
+              Write-Host "      • $k" -ForegroundColor Gray
+            }
+          } else {
+            Write-Host "      (empty or error)" -ForegroundColor Gray
+          }
+
+          Write-Host ""
           Write-Host "    Checking for Telegram Portable on B2..." -ForegroundColor Cyan
           $tgZipName  = "telegram-portable.zip"
           $localTgZip = "C:\telegram-portable.zip"
 
-          & $aws s3api head-object --bucket $env:B2_BUCKET --key $tgZipName --endpoint-url $endpoint 2>$null | Out-Null
+          $tgExists = $remoteKeys -contains $tgZipName
 
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "    ✓  Telegram Portable found on B2" -ForegroundColor Green
-          } else {
+          if ($tgExists) {
+            Write-Host "    ✓  Telegram Portable found on B2 — downloading..." -ForegroundColor Green
+            $tgDownloaded = $false
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              & $aws s3 cp "s3://$env:B2_BUCKET/$tgZipName" $localTgZip --endpoint-url $endpoint --no-progress
+              if ((Test-Path $localTgZip) -and ((Get-Item $localTgZip).Length -gt 0)) {
+                $tgDownloaded = $true
+                break
+              }
+              Start-Sleep -Seconds 5
+            }
+            if ($tgDownloaded) {
+              $sizeMB = [math]::Round((Get-Item $localTgZip).Length / 1MB, 2)
+              Write-Host "    ✓  Downloaded: $sizeMB MB" -ForegroundColor Green
+            } else {
+              Write-Host "    ⚠  Download failed — falling back to telegram.org" -ForegroundColor Yellow
+              $tgExists = $false
+            }
+          }
+
+          if (-not $tgExists) {
             Write-Host "    ↓  Not on B2 — fetching from telegram.org" -ForegroundColor Yellow
             try {
               Invoke-WebRequest -Uri "https://telegram.org/dl/desktop/win64_portable" `
@@ -325,8 +390,9 @@ jobs:
 
           Write-Host ""
           Write-Host "    Checking for user backup..." -ForegroundColor Cyan
-          & $aws s3api head-object --bucket $env:B2_BUCKET --key "userdata.zip" --endpoint-url $endpoint 2>$null | Out-Null
-          if ($LASTEXITCODE -ne 0) {
+          $backupExists = $remoteKeys -contains "userdata.zip"
+
+          if (-not $backupExists) {
             Write-Host "    ⓘ  No backup found (first run)" -ForegroundColor Yellow
             Write-Host ""
             Write-Host "  └─ Restore skipped" -ForegroundColor Green
@@ -358,22 +424,16 @@ jobs:
           Write-Host "    ✓  Downloaded: $sizeMB MB" -ForegroundColor Green
 
           Write-Host "    Extracting user data with 7-Zip..." -ForegroundColor Cyan
-          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
-          if (-not (Test-Path $sevenZip)) {
-            $sevenZip = (Get-ChildItem "C:\Program Files\7-Zip\7z.exe","C:\Program Files (x86)\7-Zip\7z.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
-          }
-
-          if (Test-Path $sevenZip) {
-            & $sevenZip x $backupZip "-oC:\Users\runneradmin" -y -bso0 -bsp0 2>&1 | Out-Null
-            Write-Host "    ✓  Extracted with 7-Zip" -ForegroundColor Green
-          } else {
-            Write-Host "    ⚠  7-Zip not found — trying Expand-Archive" -ForegroundColor Yellow
-            try {
-              Expand-Archive -Path $backupZip -DestinationPath "C:\Users\runneradmin" -Force -ErrorAction Stop
-              Write-Host "    ✓  Extracted with Expand-Archive" -ForegroundColor Green
-            } catch {
-              Write-Host "    ⚠  Extract warning: $_" -ForegroundColor Yellow
+          $sevenZipExe = "C:\Program Files\7-Zip\7z.exe"
+          try {
+            & $sevenZipExe x $backupZip "-oC:\Users\runneradmin" -y -bso0 -bsp0 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "    ✓  Extracted to C:\Users\runneradmin" -ForegroundColor Green
+            } else {
+              Write-Host "    ⚠  7z exited with code $LASTEXITCODE" -ForegroundColor Yellow
             }
+          } catch {
+            Write-Host "    ⚠  Extract warning: $_" -ForegroundColor Yellow
           }
           Remove-Item $backupZip -Force -ErrorAction SilentlyContinue
 
@@ -408,7 +468,7 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "[7/8]  Setup Telegram and Desktop"
+      - name: "[8/9]  Setup Telegram and Desktop"
         continue-on-error: true
         shell: pwsh
         run: |
@@ -422,6 +482,7 @@ jobs:
           $tgExe        = "$tgFinalDir\Telegram.exe"
           $tgZip        = "C:\telegram-portable.zip"
           $tgExtractTmp = "C:\tg-temp-extract"
+          $sevenZipExe  = "C:\Program Files\7-Zip\7z.exe"
 
           if (-not (Test-Path $desktop)) {
             New-Item -ItemType Directory -Path $desktop -Force | Out-Null
@@ -463,24 +524,17 @@ jobs:
               New-Item -ItemType Directory -Path $tgExtractTmp -Force | Out-Null
 
               Write-Host "    Extracting archive with 7-Zip..." -ForegroundColor Cyan
-              $sevenZip = "C:\Program Files\7-Zip\7z.exe"
-              if (-not (Test-Path $sevenZip)) {
-                $sevenZip = (Get-ChildItem "C:\Program Files\7-Zip\7z.exe","C:\Program Files (x86)\7-Zip\7z.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
-              }
-
-              if (Test-Path $sevenZip) {
-                & $sevenZip x $tgZip "-o$tgExtractTmp" -y -bso0 -bsp0 2>&1 | Out-Null
-                Write-Host "    ✓  Extracted with 7-Zip" -ForegroundColor Green
-              } else {
-                Write-Host "    ⚠  7-Zip not found — trying Expand-Archive" -ForegroundColor Yellow
-                try {
-                  Expand-Archive -Path $tgZip -DestinationPath $tgExtractTmp -Force -ErrorAction Stop
-                  Write-Host "    ✓  Extracted with Expand-Archive" -ForegroundColor Green
-                } catch {
-                  Write-Host "    ⚠  Extract failed: $_" -ForegroundColor Yellow
-                  $global:LASTEXITCODE = 0
-                  exit 0
+              try {
+                & $sevenZipExe x $tgZip "-o$tgExtractTmp" -y -bso0 -bsp0 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                  Write-Host "    ✓  Extracted to temp" -ForegroundColor Green
+                } else {
+                  Write-Host "    ⚠  7z exited with code $LASTEXITCODE" -ForegroundColor Yellow
                 }
+              } catch {
+                Write-Host "    ⚠  Extract failed: $_" -ForegroundColor Yellow
+                $global:LASTEXITCODE = 0
+                exit 0
               }
               Remove-Item $tgZip -Force -ErrorAction SilentlyContinue
 
@@ -577,7 +631,7 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "[8/8]  Apply Desktop Layout"
+      - name: "[9/9]  Apply Desktop Layout"
         continue-on-error: true
         shell: pwsh
         run: |
@@ -655,7 +709,9 @@ jobs:
           for ($i = 1; $i -le $totalMinutes; $i++) {
             Start-Sleep -Seconds 60
             $remaining = $totalMinutes - $i
-            Write-Host "    [$i/$totalMinutes]  remaining: ${remaining}m" -ForegroundColor Gray
+            $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
+            $tsIP  = "$(& $tsExe ip -4 2>&1)".Trim()
+            Write-Host "    [$i/$totalMinutes]  remaining: ${remaining}m   IP: $tsIP" -ForegroundColor Gray
           }
 
           Write-Host ""
@@ -674,9 +730,10 @@ jobs:
           Write-Host "  ┌─ Backup ──────────────────────────────────────────────┐" -ForegroundColor Magenta
           Write-Host ""
 
-          $userDir = "C:\Users\runneradmin"
-          $stage   = "C:\backup-stage"
-          $zipPath = "C:\userdata.zip"
+          $userDir     = "C:\Users\runneradmin"
+          $stage       = "C:\backup-stage"
+          $zipPath     = "C:\userdata.zip"
+          $sevenZipExe = "C:\Program Files\7-Zip\7z.exe"
 
           if (Test-Path $stage) { Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue }
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
@@ -778,41 +835,19 @@ jobs:
           $global:LASTEXITCODE = 0
 
           Write-Host ""
-          Write-Host "    Compressing archive with 7-Zip (store mode)..." -ForegroundColor Cyan
+          Write-Host "    Compressing with 7-Zip (store mode - no compression)..." -ForegroundColor Cyan
 
-          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
-          if (-not (Test-Path $sevenZip)) {
-            $sevenZip = (Get-ChildItem "C:\Program Files\7-Zip\7z.exe","C:\Program Files (x86)\7-Zip\7z.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          & $sevenZipExe a -tzip $zipPath "$stage\*" -mx0 -y -bso0 -bsp0 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "    ⚠  7z store failed, retrying with -mmt..." -ForegroundColor Yellow
+            & $sevenZipExe a -tzip $zipPath "$stage\*" -mx0 -mmt=on -y 2>&1 | Out-Null
           }
 
-          if (-not (Test-Path $sevenZip)) {
-            Write-Host "    ⚠  7-Zip not found — installing..." -ForegroundColor Yellow
-            try {
-              $sevenZipMsi = "$env:TEMP\7z-installer.exe"
-              Invoke-WebRequest -Uri "https://www.7-zip.org/a/7z2408-x64.exe" -OutFile $sevenZipMsi -UseBasicParsing -ErrorAction Stop
-              Start-Process $sevenZipMsi -ArgumentList "/S" -Wait
-              Start-Sleep -Seconds 5
-              $sevenZip = "C:\Program Files\7-Zip\7z.exe"
-            } catch {
-              Write-Host "    ⚠  7-Zip install failed: $_" -ForegroundColor Yellow
-            }
-          }
-
-          if (Test-Path $sevenZip) {
-            Push-Location $stage
-            & $sevenZip a -tzip -mx=0 "$zipPath" "*" -bso0 -bsp0 2>&1 | Out-Null
-            Pop-Location
-            if (Test-Path $zipPath) {
-              $zipGB = [math]::Round((Get-Item $zipPath).Length / 1GB, 3)
-              Write-Host "    ✓  Archive created: $zipGB GB" -ForegroundColor Green
-            }
+          if (Test-Path $zipPath) {
+            $zipGB = [math]::Round((Get-Item $zipPath).Length / 1GB, 3)
+            Write-Host "    ✓  Archive created: $zipGB GB" -ForegroundColor Green
           } else {
-            Write-Host "    ⚠  7-Zip unavailable — using Compress-Archive" -ForegroundColor Yellow
-            Compress-Archive -Path "$stage\*" -DestinationPath $zipPath -Force -CompressionLevel NoCompression -ErrorAction SilentlyContinue
-            if (Test-Path $zipPath) {
-              $zipGB = [math]::Round((Get-Item $zipPath).Length / 1GB, 3)
-              Write-Host "    ✓  Archive created: $zipGB GB" -ForegroundColor Green
-            }
+            Write-Host "    ✗  Archive creation failed" -ForegroundColor Red
           }
 
           Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
