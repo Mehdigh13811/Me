@@ -338,14 +338,21 @@ jobs:
           $backupZip  = "C:\userdata.zip"
           $downloaded = $false
 
-          for ($attempt = 1; $attempt -le 3; $attempt++) {
-            Write-Host "      attempt $attempt/3 ..." -ForegroundColor DarkGray
-            & $aws s3api get-object --bucket $env:B2_BUCKET --key "userdata.zip" $backupZip --endpoint-url $endpoint 2>&1 | Out-Null
+          for ($attempt = 1; $attempt -le 5; $attempt++) {
+            Write-Host "      attempt $attempt/5 ..." -ForegroundColor DarkGray
+            try {
+              $presignedUrl = & $aws s3 presign "s3://$env:B2_BUCKET/userdata.zip" --endpoint-url $endpoint --expires-in 3600 2>&1 | Select-Object -Last 1
+              if ($presignedUrl -and $presignedUrl -match '^https?://') {
+                Invoke-WebRequest -Uri $presignedUrl.Trim() -OutFile $backupZip -UseBasicParsing -ErrorAction Stop
+              }
+            } catch {
+              Write-Host "        $($_.Exception.Message)" -ForegroundColor DarkGray
+            }
             if ((Test-Path $backupZip) -and ((Get-Item $backupZip).Length -gt 0)) {
               $downloaded = $true
               break
             }
-            Start-Sleep -Seconds 15
+            Start-Sleep -Seconds 10
           }
 
           if (-not $downloaded) {
@@ -437,7 +444,21 @@ jobs:
               $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
               $endpoint = "https://$env:B2_ENDPOINT"
 
-              & $aws s3api get-object --bucket $env:B2_BUCKET --key "telegram-portable.zip" $tgZip --endpoint-url $endpoint 2>&1 | Out-Null
+              if (Test-Path $tgZip) { Remove-Item $tgZip -Force -ErrorAction SilentlyContinue }
+
+              for ($attempt = 1; $attempt -le 5; $attempt++) {
+                Write-Host "      attempt $attempt/5 ..." -ForegroundColor DarkGray
+                try {
+                  $presignedUrl = & $aws s3 presign "s3://$env:B2_BUCKET/telegram-portable.zip" --endpoint-url $endpoint --expires-in 3600 2>&1 | Select-Object -Last 1
+                  if ($presignedUrl -and $presignedUrl -match '^https?://') {
+                    Invoke-WebRequest -Uri $presignedUrl.Trim() -OutFile $tgZip -UseBasicParsing -ErrorAction Stop
+                  }
+                } catch {
+                  Write-Host "        $($_.Exception.Message)" -ForegroundColor DarkGray
+                }
+                if ((Test-Path $tgZip) -and ((Get-Item $tgZip).Length -gt 0)) { break }
+                Start-Sleep -Seconds 10
+              }
 
               if (-not (Test-Path $tgZip) -or ((Get-Item $tgZip).Length -eq 0)) {
                 Write-Host "    ⚠  Download from B2 failed" -ForegroundColor Yellow
