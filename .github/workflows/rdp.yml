@@ -11,8 +11,6 @@ env:
   B2_BUCKET: "my-files-backup-forrdp"
   B2_ENDPOINT: "s3.us-west-004.backblazeb2.com"
   B2_REGION: "us-west-004"
-  AWS_REQUEST_CHECKSUM_CALCULATION: "when_required"
-  AWS_RESPONSE_CHECKSUM_VALIDATION: "when_required"
 
 jobs:
   build:
@@ -27,7 +25,7 @@ jobs:
           $g = 'Gray'
           Write-Host ""
           Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor $c
-          Write-Host "  ║           GITHUB WINDOWS RDP SERVER  v16.0           ║" -ForegroundColor $c
+          Write-Host "  ║           GITHUB WINDOWS RDP SERVER  v16.1           ║" -ForegroundColor $c
           Write-Host "  ╠══════════════════════════════════════════════════════╣" -ForegroundColor $c
           Write-Host "  ║   User      :  runneradmin                           ║" -ForegroundColor $c
           Write-Host "  ║   Storage   :  Backblaze B2                          ║" -ForegroundColor $c
@@ -86,7 +84,7 @@ jobs:
           Write-Host "  └─ All checks passed" -ForegroundColor Green
           Write-Host ""
 
-      - name: "[2/8]  Prepare AWS CLI and B2 CLI, Verify B2"
+      - name: "[2/8]  Prepare AWS CLI and Verify B2"
         shell: pwsh
         run: |
           Write-Host ""
@@ -104,31 +102,6 @@ jobs:
             Write-Host "    ✓  AWS CLI ready" -ForegroundColor Green
           } catch {
             Write-Host "    ✗  Install failed: $_" -ForegroundColor Red
-            exit 1
-          }
-
-          Write-Host "    Installing B2 CLI..." -ForegroundColor Cyan
-          try {
-            $b2Zip = "$env:TEMP\b2.zip"
-            $b2Dir = "C:\b2cli"
-            if (-not (Test-Path "$b2Dir\b2.exe")) {
-              Invoke-WebRequest -Uri "https://github.com/Backblaze/B2_Command_Line_Tool/releases/latest/download/b2-windows.zip" -OutFile $b2Zip -UseBasicParsing -ErrorAction Stop
-              Expand-Archive -Path $b2Zip -DestinationPath $b2Dir -Force
-            }
-            $b2 = "$b2Dir\b2.exe"
-            if (-not (Test-Path $b2)) {
-              Write-Host "    ✗  b2.exe not found after extract" -ForegroundColor Red
-              exit 1
-            }
-            & $b2 account authorize $env:B2_KEY_ID $env:B2_APP_KEY 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-              Write-Host "    ✗  B2 CLI authorize failed" -ForegroundColor Red
-              exit 1
-            }
-            Write-Host "    ✓  B2 CLI ready" -ForegroundColor Green
-            "B2_CLI=$b2" | Out-File -FilePath "$env:GITHUB_ENV" -Append -Encoding utf8
-          } catch {
-            Write-Host "    ✗  B2 CLI install failed: $_" -ForegroundColor Red
             exit 1
           }
 
@@ -315,18 +288,16 @@ jobs:
           $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
           $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
           $env:AWS_DEFAULT_REGION    = $env:B2_REGION
-          $env:AWS_REQUEST_CHECKSUM_CALCULATION = "when_required"
-          $env:AWS_RESPONSE_CHECKSUM_VALIDATION = "when_required"
           $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
           $endpoint = "https://$env:B2_ENDPOINT"
-          $b2       = $env:B2_CLI
 
           Write-Host "    Checking for Telegram Portable on B2..." -ForegroundColor Cyan
           $tgZipName  = "telegram-portable.zip"
           $localTgZip = "C:\telegram-portable.zip"
 
-          $tgExists = & $b2 ls "b2://$env:B2_BUCKET/$tgZipName" 2>&1
-          if ($LASTEXITCODE -eq 0 -and $tgExists) {
+          & $aws s3api head-object --bucket $env:B2_BUCKET --key $tgZipName --endpoint-url $endpoint 2>$null | Out-Null
+
+          if ($LASTEXITCODE -eq 0) {
             Write-Host "    ✓  Telegram Portable found on B2" -ForegroundColor Green
           } else {
             Write-Host "    ↓  Not on B2 — fetching from telegram.org" -ForegroundColor Yellow
@@ -343,7 +314,7 @@ jobs:
 
             Write-Host "    ↑  Uploading to B2..." -ForegroundColor Cyan
             for ($attempt = 1; $attempt -le 3; $attempt++) {
-              & $b2 upload-file $env:B2_BUCKET $localTgZip $tgZipName 2>&1 | Out-Null
+              & $aws s3 cp $localTgZip "s3://$env:B2_BUCKET/$tgZipName" --endpoint-url $endpoint --no-progress
               if ($LASTEXITCODE -eq 0) {
                 Write-Host "    ✓  Uploaded to B2" -ForegroundColor Green
                 break
@@ -354,8 +325,8 @@ jobs:
 
           Write-Host ""
           Write-Host "    Checking for user backup..." -ForegroundColor Cyan
-          $backupExists = & $b2 ls "b2://$env:B2_BUCKET/userdata.zip" 2>&1
-          if ($LASTEXITCODE -ne 0 -or -not $backupExists) {
+          & $aws s3api head-object --bucket $env:B2_BUCKET --key "userdata.zip" --endpoint-url $endpoint 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 0) {
             Write-Host "    ⓘ  No backup found (first run)" -ForegroundColor Yellow
             Write-Host ""
             Write-Host "  └─ Restore skipped" -ForegroundColor Green
@@ -368,25 +339,13 @@ jobs:
           $backupZip  = "C:\userdata.zip"
           $downloaded = $false
 
-          if (Test-Path $backupZip) { Remove-Item $backupZip -Force -ErrorAction SilentlyContinue }
-
           for ($attempt = 1; $attempt -le 3; $attempt++) {
-            Write-Host "      attempt $attempt/3 ..." -ForegroundColor DarkGray
-            try {
-              $fileInfo = & $b2 ls --json "b2://$env:B2_BUCKET/userdata.zip" 2>&1 | ConvertFrom-Json
-              $fileId = $fileInfo.fileId
-              $fileName = $fileInfo.fileName
-              if ($fileId) {
-                & $b2 download-file-by-id $fileId $backupZip 2>&1 | ForEach-Object { Write-Host "        $_" -ForegroundColor DarkGray }
-              }
-            } catch {
-              Write-Host "        $($_.Exception.Message)" -ForegroundColor DarkGray
-            }
+            & $aws s3 cp "s3://$env:B2_BUCKET/userdata.zip" $backupZip --endpoint-url $endpoint --no-progress
             if ((Test-Path $backupZip) -and ((Get-Item $backupZip).Length -gt 0)) {
               $downloaded = $true
               break
             }
-            Start-Sleep -Seconds 5
+            Start-Sleep -Seconds 10
           }
 
           if (-not $downloaded) {
@@ -398,12 +357,23 @@ jobs:
           $sizeMB = [math]::Round((Get-Item $backupZip).Length / 1MB, 2)
           Write-Host "    ✓  Downloaded: $sizeMB MB" -ForegroundColor Green
 
-          Write-Host "    Extracting user data..." -ForegroundColor Cyan
-          try {
-            tar.exe -x -f $backupZip -C "C:\Users\runneradmin"
-            Write-Host "    ✓  Extracted to C:\Users\runneradmin" -ForegroundColor Green
-          } catch {
-            Write-Host "    ⚠  Extract warning: $_" -ForegroundColor Yellow
+          Write-Host "    Extracting user data with 7-Zip..." -ForegroundColor Cyan
+          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+          if (-not (Test-Path $sevenZip)) {
+            $sevenZip = (Get-ChildItem "C:\Program Files\7-Zip\7z.exe","C:\Program Files (x86)\7-Zip\7z.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          }
+
+          if (Test-Path $sevenZip) {
+            & $sevenZip x $backupZip "-oC:\Users\runneradmin" -y -bso0 -bsp0 2>&1 | Out-Null
+            Write-Host "    ✓  Extracted with 7-Zip" -ForegroundColor Green
+          } else {
+            Write-Host "    ⚠  7-Zip not found — trying Expand-Archive" -ForegroundColor Yellow
+            try {
+              Expand-Archive -Path $backupZip -DestinationPath "C:\Users\runneradmin" -Force -ErrorAction Stop
+              Write-Host "    ✓  Extracted with Expand-Archive" -ForegroundColor Green
+            } catch {
+              Write-Host "    ⚠  Extract warning: $_" -ForegroundColor Yellow
+            }
           }
           Remove-Item $backupZip -Force -ErrorAction SilentlyContinue
 
@@ -472,23 +442,13 @@ jobs:
             } else {
               Write-Host "    ↓  Fetching Telegram from B2..." -ForegroundColor Cyan
 
-              $b2 = $env:B2_CLI
-              if (Test-Path $tgZip) { Remove-Item $tgZip -Force -ErrorAction SilentlyContinue }
+              $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
+              $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
+              $env:AWS_DEFAULT_REGION    = $env:B2_REGION
+              $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
+              $endpoint = "https://$env:B2_ENDPOINT"
 
-              for ($attempt = 1; $attempt -le 3; $attempt++) {
-                Write-Host "      attempt $attempt/3 ..." -ForegroundColor DarkGray
-                try {
-                  $fileInfo = & $b2 ls --json "b2://$env:B2_BUCKET/telegram-portable.zip" 2>&1 | ConvertFrom-Json
-                  $fileId   = $fileInfo.fileId
-                  if ($fileId) {
-                    & $b2 download-file-by-id $fileId $tgZip 2>&1 | ForEach-Object { Write-Host "        $_" -ForegroundColor DarkGray }
-                  }
-                } catch {
-                  Write-Host "        $($_.Exception.Message)" -ForegroundColor DarkGray
-                }
-                if ((Test-Path $tgZip) -and ((Get-Item $tgZip).Length -gt 0)) { break }
-                Start-Sleep -Seconds 5
-              }
+              & $aws s3 cp "s3://$env:B2_BUCKET/telegram-portable.zip" $tgZip --endpoint-url $endpoint --no-progress
 
               if (-not (Test-Path $tgZip) -or ((Get-Item $tgZip).Length -eq 0)) {
                 Write-Host "    ⚠  Download from B2 failed" -ForegroundColor Yellow
@@ -502,14 +462,25 @@ jobs:
               if (Test-Path $tgExtractTmp) { Remove-Item $tgExtractTmp -Recurse -Force }
               New-Item -ItemType Directory -Path $tgExtractTmp -Force | Out-Null
 
-              Write-Host "    Extracting archive..." -ForegroundColor Cyan
-              try {
-                tar.exe -x -f $tgZip -C $tgExtractTmp
-                Write-Host "    ✓  Extracted to temp" -ForegroundColor Green
-              } catch {
-                Write-Host "    ⚠  Extract failed: $_" -ForegroundColor Yellow
-                $global:LASTEXITCODE = 0
-                exit 0
+              Write-Host "    Extracting archive with 7-Zip..." -ForegroundColor Cyan
+              $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+              if (-not (Test-Path $sevenZip)) {
+                $sevenZip = (Get-ChildItem "C:\Program Files\7-Zip\7z.exe","C:\Program Files (x86)\7-Zip\7z.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+              }
+
+              if (Test-Path $sevenZip) {
+                & $sevenZip x $tgZip "-o$tgExtractTmp" -y -bso0 -bsp0 2>&1 | Out-Null
+                Write-Host "    ✓  Extracted with 7-Zip" -ForegroundColor Green
+              } else {
+                Write-Host "    ⚠  7-Zip not found — trying Expand-Archive" -ForegroundColor Yellow
+                try {
+                  Expand-Archive -Path $tgZip -DestinationPath $tgExtractTmp -Force -ErrorAction Stop
+                  Write-Host "    ✓  Extracted with Expand-Archive" -ForegroundColor Green
+                } catch {
+                  Write-Host "    ⚠  Extract failed: $_" -ForegroundColor Yellow
+                  $global:LASTEXITCODE = 0
+                  exit 0
+                }
               }
               Remove-Item $tgZip -Force -ErrorAction SilentlyContinue
 
@@ -672,28 +643,19 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "Keep Alive (5 minutes TEST)"
+      - name: "Keep Alive (5 minutes)"
         if: always()
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ┌─ Keep Alive (TEST MODE) ──────────────────────────────┐" -ForegroundColor Cyan
+          Write-Host "  ┌─ Keep Alive ──────────────────────────────────────────┐" -ForegroundColor Cyan
           Write-Host ""
 
           $totalMinutes = 5
           for ($i = 1; $i -le $totalMinutes; $i++) {
             Start-Sleep -Seconds 60
             $remaining = $totalMinutes - $i
-            $h = [math]::Floor($remaining / 60)
-            $m = $remaining % 60
-
-            if ($i % 30 -eq 0 -or $i -eq 1) {
-              $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
-              $tsIP  = "$(& $tsExe ip -4 2>&1)".Trim()
-              Write-Host "    [$i/$totalMinutes]  remaining: ${h}h ${m}m   IP: $tsIP" -ForegroundColor Gray
-            } else {
-              Write-Host "    [$i/$totalMinutes]  remaining: ${h}h ${m}m" -ForegroundColor DarkGray
-            }
+            Write-Host "    [$i/$totalMinutes]  remaining: ${remaining}m" -ForegroundColor Gray
           }
 
           Write-Host ""
@@ -816,21 +778,40 @@ jobs:
           $global:LASTEXITCODE = 0
 
           Write-Host ""
-          Write-Host "    Packaging archive (store mode - no compression)..." -ForegroundColor Cyan
-          if (Test-Path $zipPath) { Remove-Item $zipPath -Force -ErrorAction SilentlyContinue }
+          Write-Host "    Compressing archive with 7-Zip (store mode)..." -ForegroundColor Cyan
 
-          tar.exe -a -c -f $zipPath -C $stage .
+          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+          if (-not (Test-Path $sevenZip)) {
+            $sevenZip = (Get-ChildItem "C:\Program Files\7-Zip\7z.exe","C:\Program Files (x86)\7-Zip\7z.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          }
 
-          if (Test-Path $zipPath) {
-            $zipGB = [math]::Round((Get-Item $zipPath).Length / 1GB, 3)
-            Write-Host "    ✓  Archive created (stored): $zipGB GB" -ForegroundColor Green
+          if (-not (Test-Path $sevenZip)) {
+            Write-Host "    ⚠  7-Zip not found — installing..." -ForegroundColor Yellow
+            try {
+              $sevenZipMsi = "$env:TEMP\7z-installer.exe"
+              Invoke-WebRequest -Uri "https://www.7-zip.org/a/7z2408-x64.exe" -OutFile $sevenZipMsi -UseBasicParsing -ErrorAction Stop
+              Start-Process $sevenZipMsi -ArgumentList "/S" -Wait
+              Start-Sleep -Seconds 5
+              $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+            } catch {
+              Write-Host "    ⚠  7-Zip install failed: $_" -ForegroundColor Yellow
+            }
+          }
 
-            if ($zipGB -gt 10) {
-              Write-Host "    ⚠  Over 10 GB — removing Downloads" -ForegroundColor Yellow
-              Remove-Item "$stage\Downloads" -Recurse -Force -ErrorAction SilentlyContinue
-              Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-              tar.exe -a -c -f $zipPath -C $stage .
-              Write-Host "    ✓  New size: $([math]::Round((Get-Item $zipPath).Length/1GB,3)) GB" -ForegroundColor Green
+          if (Test-Path $sevenZip) {
+            Push-Location $stage
+            & $sevenZip a -tzip -mx=0 "$zipPath" "*" -bso0 -bsp0 2>&1 | Out-Null
+            Pop-Location
+            if (Test-Path $zipPath) {
+              $zipGB = [math]::Round((Get-Item $zipPath).Length / 1GB, 3)
+              Write-Host "    ✓  Archive created: $zipGB GB" -ForegroundColor Green
+            }
+          } else {
+            Write-Host "    ⚠  7-Zip unavailable — using Compress-Archive" -ForegroundColor Yellow
+            Compress-Archive -Path "$stage\*" -DestinationPath $zipPath -Force -CompressionLevel NoCompression -ErrorAction SilentlyContinue
+            if (Test-Path $zipPath) {
+              $zipGB = [math]::Round((Get-Item $zipPath).Length / 1GB, 3)
+              Write-Host "    ✓  Archive created: $zipGB GB" -ForegroundColor Green
             }
           }
 
@@ -865,12 +846,16 @@ jobs:
           $sizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
           Write-Host "    Archive size : $sizeMB MB" -ForegroundColor Cyan
 
-          $b2 = $env:B2_CLI
+          $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
+          $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
+          $env:AWS_DEFAULT_REGION    = $env:B2_REGION
+          $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
+          $endpoint = "https://$env:B2_ENDPOINT"
 
           $uploaded = $false
           for ($attempt = 1; $attempt -le 5; $attempt++) {
             Write-Host "    ↑  attempt $attempt/5 ..." -ForegroundColor DarkGray
-            & $b2 upload-file --noProgress $env:B2_BUCKET $zipPath "userdata.zip" 2>&1 | ForEach-Object { Write-Host "        $_" -ForegroundColor DarkGray }
+            & $aws s3 cp $zipPath "s3://$env:B2_BUCKET/userdata.zip" --endpoint-url $endpoint --no-progress
             if ($LASTEXITCODE -eq 0) {
               $uploaded = $true
               break
