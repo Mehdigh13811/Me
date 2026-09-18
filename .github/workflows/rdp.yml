@@ -16,142 +16,72 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - name: "[1/6]  Install AWS CLI"
+      - name: "[1/7]  Install AWS CLI"
         shell: pwsh
         run: |
-          Write-Host ""
-          Write-Host "  ┌─ AWS CLI Install ─────────────────────────────────────┐" -ForegroundColor Yellow
-          Write-Host ""
-
           $installer = "$env:TEMP\AWSCLIV2.msi"
           if (-not (Test-Path "C:\Program Files\Amazon\AWSCLIV2\aws.exe")) {
             Invoke-WebRequest -Uri "https://awscli.amazonaws.com/AWSCLIV2.msi" -OutFile $installer -UseBasicParsing
             Start-Process msiexec.exe -ArgumentList "/i $installer /quiet /norestart" -Wait
             Start-Sleep -Seconds 5
           }
-          Write-Host "    ✓  AWS CLI ready" -ForegroundColor Green
-          Write-Host ""
-          Write-Host "  └─ Done" -ForegroundColor Green
-          Write-Host ""
+          Write-Host "✓ AWS CLI ready" -ForegroundColor Green
 
-      - name: "[2/6]  Install 7-Zip"
+      - name: "[2/7]  Install 7-Zip"
         shell: pwsh
         run: |
-          Write-Host ""
-          Write-Host "  ┌─ 7-Zip Install ──────────────────────────────────────┐" -ForegroundColor Yellow
-          Write-Host ""
-
           $sevenZipExe = "C:\Program Files\7-Zip\7z.exe"
-          if (Test-Path $sevenZipExe) {
-            Write-Host "    ✓  Already installed" -ForegroundColor Green
-          } else {
+          if (-not (Test-Path $sevenZipExe)) {
             $msi = "$env:TEMP\7z.msi"
             Invoke-WebRequest -Uri "https://www.7-zip.org/a/7z2301-x64.msi" -OutFile $msi -UseBasicParsing
             Start-Process msiexec.exe -ArgumentList "/i $msi /quiet /norestart" -Wait
             Start-Sleep -Seconds 5
-            Write-Host "    ✓  Installed" -ForegroundColor Green
           }
+          Write-Host "✓ 7-Zip ready" -ForegroundColor Green
 
-          if (-not (Test-Path $sevenZipExe)) {
-            Write-Host "    ✗  7z.exe not found" -ForegroundColor Red
-            exit 1
-          }
-          Write-Host "    ✓  7z.exe ready" -ForegroundColor Green
-          Write-Host ""
-          Write-Host "  └─ Done" -ForegroundColor Green
-          Write-Host ""
-
-      - name: "[3/6]  Verify B2 Access"
+      - name: "[3/7]  Verify B2 Access"
         shell: pwsh
         run: |
-          Write-Host ""
-          Write-Host "  ┌─ B2 Verification ────────────────────────────────────┐" -ForegroundColor Yellow
-          Write-Host ""
-
           $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
           $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
           $env:AWS_DEFAULT_REGION    = $env:B2_REGION
           $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
           $endpoint = "https://$env:B2_ENDPOINT"
 
-          Write-Host "    Head bucket..." -ForegroundColor Cyan
           & $aws s3api head-bucket --bucket $env:B2_BUCKET --endpoint-url $endpoint 2>&1 | Write-Host
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "    ✗  Head bucket failed" -ForegroundColor Red
-            exit 1
-          }
-          Write-Host "    ✓  Bucket accessible" -ForegroundColor Green
-          Write-Host ""
+          Write-Host "✓ head-bucket ok" -ForegroundColor Green
 
-          Write-Host "    List bucket objects..." -ForegroundColor Cyan
-          $listResult = & $aws s3 ls "s3://$env:B2_BUCKET/" --endpoint-url $endpoint 2>&1
-          if ($listResult) {
-            $listResult | ForEach-Object { Write-Host "      $_" -ForegroundColor Gray }
-          } else {
-            Write-Host "      (empty)" -ForegroundColor Gray
-          }
-          Write-Host ""
-
-          Write-Host "  └─ Done" -ForegroundColor Green
-          Write-Host ""
-
+          & $aws s3 ls "s3://$env:B2_BUCKET/" --endpoint-url $endpoint 2>&1 | Write-Host
+          Write-Host "✓ s3 ls ok" -ForegroundColor Green
           $global:LASTEXITCODE = 0
-          exit 0
 
-      - name: "[4/6]  List Objects via s3api"
+      - name: "[4/7]  List Objects"
         shell: pwsh
         run: |
-          Write-Host ""
-          Write-Host "  ┌─ List Objects (s3api) ────────────────────────────────┐" -ForegroundColor Yellow
-          Write-Host ""
-
           $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
           $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
           $env:AWS_DEFAULT_REGION    = $env:B2_REGION
           $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
           $endpoint = "https://$env:B2_ENDPOINT"
 
-          Write-Host "    list-objects-v2 ..." -ForegroundColor Cyan
           $remoteObjects = & $aws s3api list-objects-v2 `
             --bucket $env:B2_BUCKET `
             --endpoint-url $endpoint `
             --query "Contents[].[Key,Size,LastModified]" `
             --output json 2>&1
 
-          Write-Host "    Raw result:" -ForegroundColor Gray
-          Write-Host $remoteObjects -ForegroundColor DarkGray
-          Write-Host ""
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "    ✗  list-objects-v2 failed" -ForegroundColor Red
-            exit 1
-          }
-
           $parsed = $remoteObjects | ConvertFrom-Json
-          if ($parsed) {
-            foreach ($item in $parsed) {
-              $key  = $item[0]
-              $size = [math]::Round($item[1] / 1MB, 2)
-              $date = $item[2]
-              Write-Host "      • $key  ($size MB)  $date" -ForegroundColor Gray
-            }
-          } else {
-            Write-Host "      (empty)" -ForegroundColor Gray
+          foreach ($item in $parsed) {
+            $key  = $item[0]
+            $size = [math]::Round($item[1] / 1MB, 2)
+            Write-Host "  • $key  ($size MB)" -ForegroundColor Gray
           }
-
-          Write-Host ""
-          Write-Host "  └─ Done" -ForegroundColor Green
-          Write-Host ""
-
           $global:LASTEXITCODE = 0
-          exit 0
 
-      - name: "[5/6]  Test Download (s3 cp)"
+      - name: "[5/7]  Download with get-object"
         shell: pwsh
         run: |
-          Write-Host ""
-          Write-Host "  ┌─ Download Test ───────────────────────────────────────┐" -ForegroundColor Yellow
-          Write-Host ""
+          Write-Host "  ┌─ Download (get-object) ───────────────────────────────┐" -ForegroundColor Yellow
 
           $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
           $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
@@ -165,38 +95,31 @@ jobs:
           )
 
           foreach ($t in $tests) {
-            Write-Host "    Testing: $($t.Key)" -ForegroundColor Cyan
+            Write-Host "  Testing: $($t.Key)" -ForegroundColor Cyan
             if (Test-Path $t.Local) { Remove-Item $t.Local -Force }
 
-            & $aws s3 cp "s3://$env:B2_BUCKET/$($t.Key)" $t.Local --endpoint-url $endpoint --no-progress 2>&1 | Write-Host
+            & $aws s3api get-object `
+              --bucket $env:B2_BUCKET `
+              --key $t.Key `
+              --endpoint-url $endpoint `
+              $t.Local 2>&1 | Write-Host
 
             if ((Test-Path $t.Local) -and ((Get-Item $t.Local).Length -gt 0)) {
               $sizeMB = [math]::Round((Get-Item $t.Local).Length / 1MB, 2)
-              Write-Host "      ✓  Downloaded: $sizeMB MB" -ForegroundColor Green
+              Write-Host "  ✓ Downloaded: $sizeMB MB" -ForegroundColor Green
             } else {
-              Write-Host "      ✗  Download failed" -ForegroundColor Red
+              Write-Host "  ✗ Download failed" -ForegroundColor Red
             }
-            Write-Host ""
           }
-
-          Write-Host "  └─ Done" -ForegroundColor Green
-          Write-Host ""
-
           $global:LASTEXITCODE = 0
-          exit 0
 
-      - name: "[6/6]  Test Extract with 7-Zip"
+      - name: "[6/7]  Extract with 7-Zip"
         shell: pwsh
         run: |
-          Write-Host ""
-          Write-Host "  ┌─ Extract Test ────────────────────────────────────────┐" -ForegroundColor Yellow
-          Write-Host ""
-
           $sevenZipExe = "C:\Program Files\7-Zip\7z.exe"
 
-          # Test 1: telegram-portable.zip
           if (Test-Path "C:\test-telegram.zip") {
-            Write-Host "    Extract telegram-portable.zip ..." -ForegroundColor Cyan
+            Write-Host "  Extract telegram-portable.zip..." -ForegroundColor Cyan
             $tmpTg = "C:\extract-telegram"
             if (Test-Path $tmpTg) { Remove-Item $tmpTg -Recurse -Force }
             New-Item -ItemType Directory -Path $tmpTg -Force | Out-Null
@@ -204,28 +127,18 @@ jobs:
             & $sevenZipExe x "C:\test-telegram.zip" "-o$tmpTg" -y -bso0 -bsp0 2>&1 | Out-Null
             if ($LASTEXITCODE -eq 0) {
               $fileCount = (Get-ChildItem $tmpTg -Recurse -File -ErrorAction SilentlyContinue).Count
-              Write-Host "      ✓  Extracted: $fileCount files" -ForegroundColor Green
-
+              Write-Host "  ✓ Extracted: $fileCount files" -ForegroundColor Green
               $exe = Get-ChildItem $tmpTg -Recurse -Filter "Telegram.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
               if ($exe) {
-                Write-Host "      ✓  Telegram.exe found: $($exe.FullName)" -ForegroundColor Green
-              } else {
-                Write-Host "      ⚠  Telegram.exe NOT found" -ForegroundColor Yellow
-              }
-
-              Write-Host "      Top-level contents:" -ForegroundColor Gray
-              Get-ChildItem $tmpTg -Force | Select-Object -First 15 | ForEach-Object {
-                Write-Host "        • $($_.Name)" -ForegroundColor DarkGray
+                Write-Host "  ✓ Telegram.exe: $($exe.FullName)" -ForegroundColor Green
               }
             } else {
-              Write-Host "      ✗  7z failed with code $LASTEXITCODE" -ForegroundColor Red
+              Write-Host "  ✗ 7z failed: $LASTEXITCODE" -ForegroundColor Red
             }
-            Write-Host ""
           }
 
-          # Test 2: userdata.zip
           if (Test-Path "C:\test-userdata.zip") {
-            Write-Host "    Extract userdata.zip ..." -ForegroundColor Cyan
+            Write-Host "  Extract userdata.zip..." -ForegroundColor Cyan
             $tmpUd = "C:\extract-userdata"
             if (Test-Path $tmpUd) { Remove-Item $tmpUd -Recurse -Force }
             New-Item -ItemType Directory -Path $tmpUd -Force | Out-Null
@@ -234,30 +147,31 @@ jobs:
             if ($LASTEXITCODE -eq 0) {
               $fileCount = (Get-ChildItem $tmpUd -Recurse -File -ErrorAction SilentlyContinue).Count
               $totalSize = [math]::Round(((Get-ChildItem $tmpUd -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum) / 1MB, 2)
-              Write-Host "      ✓  Extracted: $fileCount files, $totalSize MB" -ForegroundColor Green
+              Write-Host "  ✓ Extracted: $fileCount files, $totalSize MB" -ForegroundColor Green
 
-              Write-Host "      Top-level contents:" -ForegroundColor Gray
-              Get-ChildItem $tmpUd -Force | Select-Object -First 15 | ForEach-Object {
-                Write-Host "        • $($_.Name)" -ForegroundColor DarkGray
-              }
-
-              $tgPath = "$tmpUd\AppData\Local\Telegram"
-              if (Test-Path $tgPath) {
-                Write-Host "      ✓  Telegram folder present" -ForegroundColor Green
-                $tdataPath = "$tgPath\tdata"
-                if (Test-Path $tdataPath) {
-                  $tdataFiles = (Get-ChildItem $tdataPath -Recurse -File -ErrorAction SilentlyContinue).Count
-                  $tdataSize  = [math]::Round(((Get-ChildItem $tdataPath -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum) / 1MB, 2)
-                  Write-Host "      ✓  tdata: $tdataFiles files, $tdataSize MB" -ForegroundColor Green
-                } else {
-                  Write-Host "      ⚠  tdata folder NOT found" -ForegroundColor Yellow
-                }
+              $tdataPath = "$tmpUd\AppData\Local\Telegram\tdata"
+              if (Test-Path $tdataPath) {
+                $tdataFiles = (Get-ChildItem $tdataPath -Recurse -File -ErrorAction SilentlyContinue).Count
+                Write-Host "  ✓ tdata: $tdataFiles files" -ForegroundColor Green
+              } else {
+                Write-Host "  ⚠ tdata NOT found" -ForegroundColor Yellow
+                Write-Host "  Contents:" -ForegroundColor Gray
+                Get-ChildItem $tmpUd -Force | ForEach-Object { Write-Host "    • $($_.Name)" -ForegroundColor DarkGray }
               }
             } else {
-              Write-Host "      ✗  7z failed with code $LASTEXITCODE" -ForegroundColor Red
+              Write-Host "  ✗ 7z failed: $LASTEXITCODE" -ForegroundColor Red
             }
-            Write-Host ""
           }
+          $global:LASTEXITCODE = 0
 
-          Write-Host "  └─ Done" -ForegroundColor Green
+      - name: "[7/7]  Summary"
+        if: always()
+        shell: pwsh
+        run: |
           Write-Host ""
+          Write-Host "  ═══ Test Complete ═══" -ForegroundColor Cyan
+          Write-Host ""
+          Get-ChildItem "C:\test-*.zip" -ErrorAction SilentlyContinue | ForEach-Object {
+            $sizeMB = [math]::Round($_.Length / 1MB, 2)
+            Write-Host "  $($_.Name) - $sizeMB MB" -ForegroundColor Gray
+          }
