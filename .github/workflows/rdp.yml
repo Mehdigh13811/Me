@@ -359,7 +359,7 @@ jobs:
 
           Write-Host "    Extracting user data..." -ForegroundColor Cyan
           try {
-            Expand-Archive -Path $backupZip -DestinationPath "C:\Users\runneradmin" -Force -ErrorAction Stop
+            tar.exe -x -f $backupZip -C "C:\Users\runneradmin"
             Write-Host "    ✓  Extracted to C:\Users\runneradmin" -ForegroundColor Green
           } catch {
             Write-Host "    ⚠  Extract warning: $_" -ForegroundColor Yellow
@@ -453,7 +453,7 @@ jobs:
 
               Write-Host "    Extracting archive..." -ForegroundColor Cyan
               try {
-                Expand-Archive -Path $tgZip -DestinationPath $tgExtractTmp -Force -ErrorAction Stop
+                tar.exe -x -f $tgZip -C $tgExtractTmp
                 Write-Host "    ✓  Extracted to temp" -ForegroundColor Green
               } catch {
                 Write-Host "    ⚠  Extract failed: $_" -ForegroundColor Yellow
@@ -621,15 +621,15 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "Keep Alive (5 hours 25 minutes)"
+      - name: "Keep Alive (5 minutes TEST)"
         if: always()
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ┌─ Keep Alive ──────────────────────────────────────────┐" -ForegroundColor Cyan
+          Write-Host "  ┌─ Keep Alive (TEST MODE) ──────────────────────────────┐" -ForegroundColor Cyan
           Write-Host ""
 
-          $totalMinutes = 325
+          $totalMinutes = 5
           for ($i = 1; $i -le $totalMinutes; $i++) {
             Start-Sleep -Seconds 60
             $remaining = $totalMinutes - $i
@@ -765,18 +765,20 @@ jobs:
           $global:LASTEXITCODE = 0
 
           Write-Host ""
-          Write-Host "    Compressing archive..." -ForegroundColor Cyan
-          Compress-Archive -Path "$stage\*" -DestinationPath $zipPath -Force -CompressionLevel Optimal -ErrorAction SilentlyContinue
+          Write-Host "    Packaging archive (store mode - no compression)..." -ForegroundColor Cyan
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force -ErrorAction SilentlyContinue }
+
+          tar.exe -a -c -f $zipPath -C $stage .
 
           if (Test-Path $zipPath) {
             $zipGB = [math]::Round((Get-Item $zipPath).Length / 1GB, 3)
-            Write-Host "    ✓  Archive created: $zipGB GB" -ForegroundColor Green
+            Write-Host "    ✓  Archive created (stored): $zipGB GB" -ForegroundColor Green
 
             if ($zipGB -gt 10) {
               Write-Host "    ⚠  Over 10 GB — removing Downloads" -ForegroundColor Yellow
               Remove-Item "$stage\Downloads" -Recurse -Force -ErrorAction SilentlyContinue
-              Remove-Item $zipPath -Force
-              Compress-Archive -Path "$stage\*" -DestinationPath $zipPath -Force -CompressionLevel Optimal
+              Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+              tar.exe -a -c -f $zipPath -C $stage .
               Write-Host "    ✓  New size: $([math]::Round((Get-Item $zipPath).Length/1GB,3)) GB" -ForegroundColor Green
             }
           }
