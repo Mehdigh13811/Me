@@ -86,7 +86,7 @@ jobs:
           Write-Host "  └─ All checks passed" -ForegroundColor Green
           Write-Host ""
 
-      - name: "[2/8]  Prepare AWS CLI and Verify B2"
+      - name: "[2/8]  Prepare AWS CLI and B2 CLI, Verify B2"
         shell: pwsh
         run: |
           Write-Host ""
@@ -104,6 +104,31 @@ jobs:
             Write-Host "    ✓  AWS CLI ready" -ForegroundColor Green
           } catch {
             Write-Host "    ✗  Install failed: $_" -ForegroundColor Red
+            exit 1
+          }
+
+          Write-Host "    Installing B2 CLI..." -ForegroundColor Cyan
+          try {
+            $b2Zip = "$env:TEMP\b2.zip"
+            $b2Dir = "C:\b2cli"
+            if (-not (Test-Path "$b2Dir\b2.exe")) {
+              Invoke-WebRequest -Uri "https://github.com/Backblaze/B2_Command_Line_Tool/releases/latest/download/b2-windows.zip" -OutFile $b2Zip -UseBasicParsing -ErrorAction Stop
+              Expand-Archive -Path $b2Zip -DestinationPath $b2Dir -Force
+            }
+            $b2 = "$b2Dir\b2.exe"
+            if (-not (Test-Path $b2)) {
+              Write-Host "    ✗  b2.exe not found after extract" -ForegroundColor Red
+              exit 1
+            }
+            & $b2 account authorize $env:B2_KEY_ID $env:B2_APP_KEY 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "    ✗  B2 CLI authorize failed" -ForegroundColor Red
+              exit 1
+            }
+            Write-Host "    ✓  B2 CLI ready" -ForegroundColor Green
+            "B2_CLI=$b2" | Out-File -FilePath "$env:GITHUB_ENV" -Append -Encoding utf8
+          } catch {
+            Write-Host "    ✗  B2 CLI install failed: $_" -ForegroundColor Red
             exit 1
           }
 
@@ -294,12 +319,13 @@ jobs:
           $env:AWS_RESPONSE_CHECKSUM_VALIDATION = "when_required"
           $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
           $endpoint = "https://$env:B2_ENDPOINT"
+          $b2       = $env:B2_CLI
 
           Write-Host "    Checking for Telegram Portable on B2..." -ForegroundColor Cyan
           $tgZipName  = "telegram-portable.zip"
           $localTgZip = "C:\telegram-portable.zip"
 
-          $tgExists = & $aws s3 ls "s3://$env:B2_BUCKET/$tgZipName" --endpoint-url $endpoint 2>&1
+          $tgExists = & $b2 ls "b2://$env:B2_BUCKET/$tgZipName" 2>&1
           if ($LASTEXITCODE -eq 0 -and $tgExists) {
             Write-Host "    ✓  Telegram Portable found on B2" -ForegroundColor Green
           } else {
@@ -317,7 +343,7 @@ jobs:
 
             Write-Host "    ↑  Uploading to B2..." -ForegroundColor Cyan
             for ($attempt = 1; $attempt -le 3; $attempt++) {
-              & $aws s3 cp $localTgZip "s3://$env:B2_BUCKET/$tgZipName" --endpoint-url $endpoint --no-progress
+              & $b2 upload-file $env:B2_BUCKET $localTgZip $tgZipName 2>&1 | Out-Null
               if ($LASTEXITCODE -eq 0) {
                 Write-Host "    ✓  Uploaded to B2" -ForegroundColor Green
                 break
@@ -328,7 +354,7 @@ jobs:
 
           Write-Host ""
           Write-Host "    Checking for user backup..." -ForegroundColor Cyan
-          $backupExists = & $aws s3 ls "s3://$env:B2_BUCKET/userdata.zip" --endpoint-url $endpoint 2>&1
+          $backupExists = & $b2 ls "b2://$env:B2_BUCKET/userdata.zip" 2>&1
           if ($LASTEXITCODE -ne 0 -or -not $backupExists) {
             Write-Host "    ⓘ  No backup found (first run)" -ForegroundColor Yellow
             Write-Host ""
@@ -346,12 +372,21 @@ jobs:
 
           for ($attempt = 1; $attempt -le 3; $attempt++) {
             Write-Host "      attempt $attempt/3 ..." -ForegroundColor DarkGray
-            & $aws s3 cp "s3://$env:B2_BUCKET/userdata.zip" $backupZip --endpoint-url $endpoint --no-progress --only-show-errors 2>&1 | ForEach-Object { Write-Host "        $_" -ForegroundColor DarkGray }
+            try {
+              $fileInfo = & $b2 ls --json "b2://$env:B2_BUCKET/userdata.zip" 2>&1 | ConvertFrom-Json
+              $fileId = $fileInfo.fileId
+              $fileName = $fileInfo.fileName
+              if ($fileId) {
+                & $b2 download-file-by-id $fileId $backupZip 2>&1 | ForEach-Object { Write-Host "        $_" -ForegroundColor DarkGray }
+              }
+            } catch {
+              Write-Host "        $($_.Exception.Message)" -ForegroundColor DarkGray
+            }
             if ((Test-Path $backupZip) -and ((Get-Item $backupZip).Length -gt 0)) {
               $downloaded = $true
               break
             }
-            Start-Sleep -Seconds 10
+            Start-Sleep -Seconds 5
           }
 
           if (-not $downloaded) {
@@ -437,21 +472,22 @@ jobs:
             } else {
               Write-Host "    ↓  Fetching Telegram from B2..." -ForegroundColor Cyan
 
-              $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
-              $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
-              $env:AWS_DEFAULT_REGION    = $env:B2_REGION
-              $env:AWS_REQUEST_CHECKSUM_CALCULATION = "when_required"
-              $env:AWS_RESPONSE_CHECKSUM_VALIDATION = "when_required"
-              $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
-              $endpoint = "https://$env:B2_ENDPOINT"
-
+              $b2 = $env:B2_CLI
               if (Test-Path $tgZip) { Remove-Item $tgZip -Force -ErrorAction SilentlyContinue }
 
               for ($attempt = 1; $attempt -le 3; $attempt++) {
                 Write-Host "      attempt $attempt/3 ..." -ForegroundColor DarkGray
-                & $aws s3 cp "s3://$env:B2_BUCKET/telegram-portable.zip" $tgZip --endpoint-url $endpoint --no-progress --only-show-errors 2>&1 | ForEach-Object { Write-Host "        $_" -ForegroundColor DarkGray }
+                try {
+                  $fileInfo = & $b2 ls --json "b2://$env:B2_BUCKET/telegram-portable.zip" 2>&1 | ConvertFrom-Json
+                  $fileId   = $fileInfo.fileId
+                  if ($fileId) {
+                    & $b2 download-file-by-id $fileId $tgZip 2>&1 | ForEach-Object { Write-Host "        $_" -ForegroundColor DarkGray }
+                  }
+                } catch {
+                  Write-Host "        $($_.Exception.Message)" -ForegroundColor DarkGray
+                }
                 if ((Test-Path $tgZip) -and ((Get-Item $tgZip).Length -gt 0)) { break }
-                Start-Sleep -Seconds 10
+                Start-Sleep -Seconds 5
               }
 
               if (-not (Test-Path $tgZip) -or ((Get-Item $tgZip).Length -eq 0)) {
@@ -829,18 +865,12 @@ jobs:
           $sizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
           Write-Host "    Archive size : $sizeMB MB" -ForegroundColor Cyan
 
-          $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
-          $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
-          $env:AWS_DEFAULT_REGION    = $env:B2_REGION
-          $env:AWS_REQUEST_CHECKSUM_CALCULATION = "when_required"
-          $env:AWS_RESPONSE_CHECKSUM_VALIDATION = "when_required"
-          $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
-          $endpoint = "https://$env:B2_ENDPOINT"
+          $b2 = $env:B2_CLI
 
           $uploaded = $false
           for ($attempt = 1; $attempt -le 5; $attempt++) {
             Write-Host "    ↑  attempt $attempt/5 ..." -ForegroundColor DarkGray
-            & $aws s3 cp $zipPath "s3://$env:B2_BUCKET/userdata.zip" --endpoint-url $endpoint --no-progress
+            & $b2 upload-file --noProgress $env:B2_BUCKET $zipPath "userdata.zip" 2>&1 | ForEach-Object { Write-Host "        $_" -ForegroundColor DarkGray }
             if ($LASTEXITCODE -eq 0) {
               $uploaded = $true
               break
