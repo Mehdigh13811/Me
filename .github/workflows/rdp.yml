@@ -15,7 +15,7 @@ env:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 355
+    timeout-minutes: 370
 
     steps:
       - name: "Banner"
@@ -25,7 +25,7 @@ jobs:
           $g = 'Gray'
           Write-Host ""
           Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor $c
-          Write-Host "  ║           GITHUB WINDOWS RDP SERVER  v16.3           ║" -ForegroundColor $c
+          Write-Host "  ║           GITHUB WINDOWS RDP SERVER  v16.4           ║" -ForegroundColor $c
           Write-Host "  ╠══════════════════════════════════════════════════════╣" -ForegroundColor $c
           Write-Host "  ║   User      :  runneradmin                           ║" -ForegroundColor $c
           Write-Host "  ║   Storage   :  Backblaze B2                          ║" -ForegroundColor $c
@@ -697,7 +697,7 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "Keep Alive (5 minutes)"
+      - name: "Keep Alive (5h 40m)"
         if: always()
         shell: pwsh
         run: |
@@ -705,13 +705,15 @@ jobs:
           Write-Host "  ┌─ Keep Alive ──────────────────────────────────────────┐" -ForegroundColor Cyan
           Write-Host ""
 
-          $totalMinutes = 5
+          $totalMinutes = 340
           for ($i = 1; $i -le $totalMinutes; $i++) {
             Start-Sleep -Seconds 60
             $remaining = $totalMinutes - $i
+            $h = [math]::Floor($remaining / 60)
+            $m = $remaining % 60
             $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
             $tsIP  = "$(& $tsExe ip -4 2>&1)".Trim()
-            Write-Host "    [$i/$totalMinutes]  remaining: ${remaining}m   IP: $tsIP" -ForegroundColor Gray
+            Write-Host "    [$i/$totalMinutes]  remaining: ${h}h ${m}m   IP: $tsIP" -ForegroundColor Gray
           }
 
           Write-Host ""
