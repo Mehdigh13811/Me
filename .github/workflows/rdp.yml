@@ -1,4 +1,4 @@
-name: Windows
+name: Windows RDP Server
 
 on:
   workflow_dispatch:
@@ -18,28 +18,32 @@ jobs:
     timeout-minutes: 355
 
     steps:
-      - name: "Welcome"
+      - name: "Banner"
         shell: pwsh
         run: |
+          $c = 'Cyan'
+          $g = 'Gray'
           Write-Host ""
-          Write-Host "  ======================================================" -ForegroundColor Cyan
-          Write-Host "         GITHUB WINDOWS RDP - v16.0" -ForegroundColor Cyan
-          Write-Host "         User: runneradmin" -ForegroundColor Cyan
-          Write-Host "         Telegram: AppData\Local\Telegram" -ForegroundColor Cyan
-          Write-Host "  ======================================================" -ForegroundColor Cyan
+          Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor $c
+          Write-Host "  ║           GITHUB WINDOWS RDP SERVER  v16.0           ║" -ForegroundColor $c
+          Write-Host "  ╠══════════════════════════════════════════════════════╣" -ForegroundColor $c
+          Write-Host "  ║   User      :  runneradmin                           ║" -ForegroundColor $c
+          Write-Host "  ║   Telegram  :  AppData\Local\Telegram                ║" -ForegroundColor $c
+          Write-Host "  ║   Storage   :  Backblaze B2                          ║" -ForegroundColor $c
+          Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor $c
           Write-Host ""
-          Write-Host "  Start time : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
-          Write-Host "  Hostname   : $env:COMPUTERNAME" -ForegroundColor Gray
+          Write-Host "  Start    :  $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor $g
+          Write-Host "  Hostname :  $env:COMPUTERNAME" -ForegroundColor $g
           Write-Host ""
 
       - name: "Checkout Repository"
         uses: actions/checkout@v4
 
-      - name: "[1/3] Validate Environment Variables"
+      - name: "[1/8]  Validate Configuration"
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  Validating environment variables..." -ForegroundColor Yellow
+          Write-Host "  ┌─ Configuration Check ────────────────────────────────┐" -ForegroundColor Yellow
           Write-Host ""
 
           $required = @(
@@ -52,41 +56,43 @@ jobs:
             @{ Name = "B2_REGION";         Value = $env:B2_REGION;         MinLen = 3  }
           )
 
-          $missing = @()
+          $failed = @()
           foreach ($item in $required) {
             if ([string]::IsNullOrWhiteSpace($item.Value)) {
-              Write-Host "  [MISSING] $($item.Name)" -ForegroundColor Red
-              $missing += $item.Name
+              Write-Host "    ✗  $($item.Name.PadRight(20)) missing" -ForegroundColor Red
+              $failed += $item.Name
             } elseif ($item.Value.Length -lt $item.MinLen) {
-              Write-Host "  [INVALID] $($item.Name) too short" -ForegroundColor Red
-              $missing += $item.Name
+              Write-Host "    ✗  $($item.Name.PadRight(20)) too short" -ForegroundColor Red
+              $failed += $item.Name
             } else {
-              Write-Host "  [OK] $($item.Name)" -ForegroundColor Green
+              Write-Host "    ✓  $($item.Name.PadRight(20)) ok" -ForegroundColor Green
             }
           }
 
-          if ($missing.Count -gt 0) {
-            Write-Host "  FAILED: $($missing -join ', ')" -ForegroundColor Red
+          if ($failed.Count -gt 0) {
+            Write-Host ""
+            Write-Host "  └─ Failed: $($failed -join ', ')" -ForegroundColor Red
+            Write-Host ""
             exit 1
           }
 
           if ($env:TAILSCALE_AUTHKEY -notmatch '^tskey-auth-') {
-            Write-Host "  [FAIL] Tailscale AuthKey format invalid" -ForegroundColor Red
+            Write-Host "    ✗  Tailscale AuthKey format invalid" -ForegroundColor Red
             exit 1
           }
 
           Write-Host ""
-          Write-Host "  [1/3] All variables valid" -ForegroundColor Green
+          Write-Host "  └─ All checks passed" -ForegroundColor Green
           Write-Host ""
 
-      - name: "[2/3] Test B2 + Install AWS CLI"
+      - name: "[2/8]  Prepare AWS CLI and Verify B2"
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  Testing Backblaze B2..." -ForegroundColor Yellow
+          Write-Host "  ┌─ Storage Preparation ────────────────────────────────┐" -ForegroundColor Yellow
           Write-Host ""
+          Write-Host "    Installing AWS CLI..." -ForegroundColor Cyan
 
-          Write-Host "  Installing AWS CLI..." -ForegroundColor Cyan
           $installer = "$env:TEMP\AWSCLIV2.msi"
           try {
             if (-not (Test-Path "C:\Program Files\Amazon\AWSCLIV2\aws.exe")) {
@@ -94,68 +100,69 @@ jobs:
               Start-Process msiexec.exe -ArgumentList "/i $installer /quiet /norestart" -Wait
               Start-Sleep -Seconds 5
             }
-            Write-Host "  [OK] AWS CLI ready" -ForegroundColor Green
+            Write-Host "    ✓  AWS CLI ready" -ForegroundColor Green
           } catch {
-            Write-Host "  [FAIL] AWS CLI install: $_" -ForegroundColor Red
+            Write-Host "    ✗  Install failed: $_" -ForegroundColor Red
             exit 1
           }
 
           $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
           $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
           $env:AWS_DEFAULT_REGION    = $env:B2_REGION
-          $aws = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
+          $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
           $endpoint = "https://$env:B2_ENDPOINT"
 
-          Write-Host "  Testing bucket access..." -ForegroundColor Cyan
+          Write-Host "    Verifying bucket access..." -ForegroundColor Cyan
           $head = & $aws s3api head-bucket --bucket $env:B2_BUCKET --endpoint-url $endpoint 2>&1
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "  [FAIL] Cannot access bucket: $head" -ForegroundColor Red
+            Write-Host "    ✗  Cannot access bucket: $head" -ForegroundColor Red
             exit 1
           }
-          Write-Host "  [OK] Bucket access works" -ForegroundColor Green
+          Write-Host "    ✓  Bucket accessible" -ForegroundColor Green
 
-          Write-Host "  Testing write access..." -ForegroundColor Cyan
+          Write-Host "    Verifying write permissions..." -ForegroundColor Cyan
           $testFile = "$env:TEMP\b2-test.txt"
           "test" | Out-File -FilePath $testFile -Encoding utf8
           & $aws s3 cp $testFile "s3://$env:B2_BUCKET/_connectivity.txt" --endpoint-url $endpoint --no-progress 2>&1 | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "  [FAIL] No write access" -ForegroundColor Red
+            Write-Host "    ✗  No write access" -ForegroundColor Red
             exit 1
           }
           & $aws s3 rm "s3://$env:B2_BUCKET/_connectivity.txt" --endpoint-url $endpoint 2>&1 | Out-Null
           Remove-Item $testFile -Force -ErrorAction SilentlyContinue
-          Write-Host "  [OK] Write access works" -ForegroundColor Green
+          Write-Host "    ✓  Write access confirmed" -ForegroundColor Green
 
           Write-Host ""
-          Write-Host "  Listing B2 contents:" -ForegroundColor Cyan
+          Write-Host "    Bucket contents:" -ForegroundColor Cyan
           $listResult = & $aws s3 ls "s3://$env:B2_BUCKET/" --endpoint-url $endpoint 2>&1
           if ($listResult) {
-            Write-Host "$listResult" -ForegroundColor Gray
+            $listResult | ForEach-Object { Write-Host "      $_" -ForegroundColor Gray }
           } else {
-            Write-Host "  (bucket is empty)" -ForegroundColor Gray
+            Write-Host "      (empty)" -ForegroundColor Gray
           }
 
           Write-Host ""
-          Write-Host "  [2/3] B2 ready" -ForegroundColor Green
+          Write-Host "  └─ Storage ready" -ForegroundColor Green
           Write-Host ""
 
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "[3/3] Install Tailscale"
+      - name: "[3/8]  Install and Connect Tailscale"
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  Installing Tailscale..." -ForegroundColor Yellow
+          Write-Host "  ┌─ Network Setup ──────────────────────────────────────┐" -ForegroundColor Yellow
           Write-Host ""
+          Write-Host "    Installing Tailscale..." -ForegroundColor Cyan
 
           $msiPath = "C:\tailscale.msi"
           try {
             Invoke-WebRequest "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" `
               -OutFile $msiPath -UseBasicParsing -ErrorAction Stop
-            Write-Host "  [OK] Downloaded" -ForegroundColor Green
+            Write-Host "    ✓  Downloaded" -ForegroundColor Green
           } catch {
-            Write-Host "  [FAIL] Download failed: $_" -ForegroundColor Red
+            Write-Host "    ✗  Download failed: $_" -ForegroundColor Red
             exit 1
           }
 
@@ -164,21 +171,21 @@ jobs:
 
           $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
           if (-not (Test-Path $tsExe)) {
-            Write-Host "  [FAIL] Tailscale not installed" -ForegroundColor Red
+            Write-Host "    ✗  Installation failed" -ForegroundColor Red
             exit 1
           }
-          Write-Host "  [OK] Tailscale installed" -ForegroundColor Green
+          Write-Host "    ✓  Installed" -ForegroundColor Green
 
           Get-Service -Name "Tailscale" -ErrorAction SilentlyContinue | Start-Service -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 5
 
-          Write-Host "  Connecting with AuthKey..." -ForegroundColor Cyan
-          $hostname = "github-rdp-$(Get-Random -Maximum 9999)"
+          Write-Host "    Connecting to network..." -ForegroundColor Cyan
+          $hostname  = "github-rdp-$(Get-Random -Maximum 9999)"
           $connected = $false
-          $tsIP = ""
+          $tsIP      = ""
 
           for ($attempt = 1; $attempt -le 6; $attempt++) {
-            Write-Host "  Attempt $attempt/6..." -ForegroundColor Cyan
+            Write-Host "      attempt $attempt/6 ..." -ForegroundColor DarkGray
             & $tsExe up --authkey="$env:TAILSCALE_AUTHKEY" --hostname=$hostname --accept-routes 2>&1 | Out-Null
             Start-Sleep -Seconds 10
             $tsIP = "$(& $tsExe ip -4 2>&1)".Trim()
@@ -189,12 +196,14 @@ jobs:
           }
 
           if (-not $connected) {
-            Write-Host "  [FAIL] Tailscale didn't connect" -ForegroundColor Red
+            Write-Host "    ✗  Connection failed" -ForegroundColor Red
             Write-Host "$(& $tsExe status 2>&1)" -ForegroundColor Gray
             exit 1
           }
 
-          Write-Host "  [OK] Tailscale connected - IP: $tsIP" -ForegroundColor Green
+          Write-Host "    ✓  Connected — IP: $tsIP" -ForegroundColor Green
+          Write-Host ""
+          Write-Host "  └─ Network ready" -ForegroundColor Green
           Write-Host ""
 
           "TAILSCALE_IP=$tsIP" | Out-File -FilePath "$env:GITHUB_ENV" -Append -Encoding utf8
@@ -202,20 +211,37 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "Enable RDP"
+      - name: "[4/8]  Enable Remote Desktop"
         shell: pwsh
         run: |
-          Write-Host "  Enabling RDP..." -ForegroundColor Yellow
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -ErrorAction SilentlyContinue
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -ErrorAction SilentlyContinue
-          Write-Host "  [OK] RDP enabled" -ForegroundColor Green
+          Write-Host ""
+          Write-Host "  ┌─ Remote Desktop Setup ───────────────────────────────┐" -ForegroundColor Yellow
           Write-Host ""
 
-      - name: "Relax Password Policy"
+          Write-Host "    Enabling RDP service..." -ForegroundColor Cyan
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -ErrorAction SilentlyContinue
+          Write-Host "    ✓  RDP enabled" -ForegroundColor Green
+
+          Write-Host "    Opening firewall rules..." -ForegroundColor Cyan
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+          Write-Host "    ✓  Firewall configured" -ForegroundColor Green
+
+          Write-Host "    Adjusting authentication..." -ForegroundColor Cyan
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -ErrorAction SilentlyContinue
+          Write-Host "    ✓  Authentication relaxed" -ForegroundColor Green
+
+          Write-Host ""
+          Write-Host "  └─ RDP ready" -ForegroundColor Green
+          Write-Host ""
+
+      - name: "[5/8]  Configure User Account"
         shell: pwsh
         run: |
-          Write-Host "  Relaxing password policy..." -ForegroundColor Yellow
+          Write-Host ""
+          Write-Host "  ┌─ User Account ───────────────────────────────────────┐" -ForegroundColor Yellow
+          Write-Host ""
+
+          Write-Host "    Adjusting password policy..." -ForegroundColor Cyan
           try {
             secedit /export /cfg C:\secpol.cfg 2>&1 | Out-Null
             $content = Get-Content C:\secpol.cfg
@@ -225,81 +251,73 @@ jobs:
             $content | Out-File C:\secpol.cfg -Encoding ASCII
             secedit /configure /db C:\Windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY 2>&1 | Out-Null
             Remove-Item C:\secpol.cfg -Force -ErrorAction SilentlyContinue
-            Write-Host "  [OK] Password policy relaxed" -ForegroundColor Green
+            Write-Host "    ✓  Policy relaxed" -ForegroundColor Green
           } catch {
-            Write-Host "  [WARN] Could not relax policy: $_" -ForegroundColor Yellow
+            Write-Host "    ⚠  Could not relax policy: $_" -ForegroundColor Yellow
           }
           gpupdate /force 2>&1 | Out-Null
-          Write-Host ""
 
-      - name: "Configure runneradmin User"
-        shell: pwsh
-        run: |
-          Write-Host ""
-          Write-Host "  ======================================================" -ForegroundColor Magenta
-          Write-Host "  Configuring user: runneradmin" -ForegroundColor Magenta
-          Write-Host "  ======================================================" -ForegroundColor Magenta
-          Write-Host ""
-
-          $username = "runneradmin"
+          $username      = "runneradmin"
           $plainPassword = $env:RDP_PASSWORD
 
-          Write-Host "  Setting password for $username..." -ForegroundColor Cyan
+          Write-Host "    Setting password for $username..." -ForegroundColor Cyan
           net user $username $plainPassword 2>&1 | Out-Null
-
           net user $username /expires:never 2>&1 | Out-Null
           net user $username /active:yes 2>&1 | Out-Null
+          Write-Host "    ✓  Password configured" -ForegroundColor Green
 
+          Write-Host "    Assigning group membership..." -ForegroundColor Cyan
           Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction SilentlyContinue
-          Write-Host "  [OK] Added to Administrators" -ForegroundColor Green
-
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username -ErrorAction SilentlyContinue
-          Write-Host "  [OK] Added to Remote Desktop Users" -ForegroundColor Green
+          Write-Host "    ✓  Administrators + Remote Desktop Users" -ForegroundColor Green
 
           Write-Host ""
-          Get-LocalUser -Name $username | Format-Table Name, Enabled, LastLogon -AutoSize
-          Write-Host ""
-          Write-Host "  [OK] runneradmin user is ready" -ForegroundColor Green
+          Write-Host "    Account summary:" -ForegroundColor Cyan
+          Get-LocalUser -Name $username | Format-Table Name, Enabled, LastLogon -AutoSize | Out-String | Write-Host
+
+          Write-Host "  └─ User ready" -ForegroundColor Green
           Write-Host ""
 
-      - name: "Ensure Telegram Portable on B2"
+      - name: "[6/8]  Restore Environment from B2"
+        continue-on-error: true
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  Ensuring Telegram Portable zip on B2..." -ForegroundColor Magenta
+          Write-Host "  ┌─ Environment Restore ─────────────────────────────────┐" -ForegroundColor Yellow
           Write-Host ""
 
           $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
           $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
           $env:AWS_DEFAULT_REGION    = $env:B2_REGION
-          $aws = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
+          $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
           $endpoint = "https://$env:B2_ENDPOINT"
-          $tgZipName = "telegram-portable.zip"
+
+          Write-Host "    Checking for Telegram Portable on B2..." -ForegroundColor Cyan
+          $tgZipName  = "telegram-portable.zip"
           $localTgZip = "C:\telegram-portable.zip"
 
-          Write-Host "  Checking B2 for $tgZipName..." -ForegroundColor Cyan
           & $aws s3api head-object --bucket $env:B2_BUCKET --key $tgZipName --endpoint-url $endpoint 2>$null | Out-Null
 
           if ($LASTEXITCODE -eq 0) {
-            Write-Host "  [OK] Telegram Portable already on B2" -ForegroundColor Green
+            Write-Host "    ✓  Telegram Portable found on B2" -ForegroundColor Green
           } else {
-            Write-Host "  [INFO] Not on B2 - downloading from telegram.org" -ForegroundColor Yellow
+            Write-Host "    ↓  Not on B2 — fetching from telegram.org" -ForegroundColor Yellow
             try {
               Invoke-WebRequest -Uri "https://telegram.org/dl/desktop/win64_portable" `
                 -OutFile $localTgZip -UseBasicParsing -ErrorAction Stop
               $sizeMB = [math]::Round((Get-Item $localTgZip).Length / 1MB, 2)
-              Write-Host "  [OK] Downloaded: $sizeMB MB" -ForegroundColor Green
+              Write-Host "    ✓  Downloaded: $sizeMB MB" -ForegroundColor Green
             } catch {
-              Write-Host "  [FAIL] Download failed: $_" -ForegroundColor Red
+              Write-Host "    ⚠  Download failed: $_" -ForegroundColor Yellow
               $global:LASTEXITCODE = 0
               exit 0
             }
 
-            Write-Host "  Uploading to B2..." -ForegroundColor Cyan
+            Write-Host "    ↑  Uploading to B2..." -ForegroundColor Cyan
             for ($attempt = 1; $attempt -le 3; $attempt++) {
               & $aws s3 cp $localTgZip "s3://$env:B2_BUCKET/$tgZipName" --endpoint-url $endpoint --no-progress
               if ($LASTEXITCODE -eq 0) {
-                Write-Host "  [OK] Uploaded to B2" -ForegroundColor Green
+                Write-Host "    ✓  Uploaded to B2" -ForegroundColor Green
                 break
               }
               Start-Sleep -Seconds 10
@@ -307,33 +325,19 @@ jobs:
           }
 
           Write-Host ""
-
-          $global:LASTEXITCODE = 0
-          exit 0
-
-      - name: "Restore User Data from B2"
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          Write-Host ""
-          Write-Host "  Restoring user data from B2..." -ForegroundColor Magenta
-          Write-Host ""
-
-          $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
-          $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
-          $env:AWS_DEFAULT_REGION    = $env:B2_REGION
-          $aws = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
-          $endpoint = "https://$env:B2_ENDPOINT"
-
+          Write-Host "    Checking for user backup..." -ForegroundColor Cyan
           & $aws s3api head-object --bucket $env:B2_BUCKET --key "userdata.zip" --endpoint-url $endpoint 2>$null | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "  [INFO] No user data backup found (first run)" -ForegroundColor Yellow
+            Write-Host "    ⓘ  No backup found (first run)" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "  └─ Restore skipped" -ForegroundColor Green
+            Write-Host ""
             $global:LASTEXITCODE = 0
             exit 0
           }
 
-          Write-Host "  Downloading userdata.zip..." -ForegroundColor Cyan
-          $backupZip = "C:\userdata.zip"
+          Write-Host "    ↓  Downloading userdata.zip..." -ForegroundColor Cyan
+          $backupZip  = "C:\userdata.zip"
           $downloaded = $false
 
           for ($attempt = 1; $attempt -le 3; $attempt++) {
@@ -346,139 +350,139 @@ jobs:
           }
 
           if (-not $downloaded) {
-            Write-Host "  [FAIL] Download failed" -ForegroundColor Red
+            Write-Host "    ⚠  Download failed" -ForegroundColor Yellow
             $global:LASTEXITCODE = 0
             exit 0
           }
 
           $sizeMB = [math]::Round((Get-Item $backupZip).Length / 1MB, 2)
-          Write-Host "  [OK] Downloaded: $sizeMB MB" -ForegroundColor Green
+          Write-Host "    ✓  Downloaded: $sizeMB MB" -ForegroundColor Green
 
-          Write-Host "  Extracting to C:\Users\runneradmin ..." -ForegroundColor Cyan
+          Write-Host "    Extracting user data..." -ForegroundColor Cyan
           try {
             Expand-Archive -Path $backupZip -DestinationPath "C:\Users\runneradmin" -Force -ErrorAction Stop
-            Write-Host "  [OK] Extracted to C:\Users\runneradmin" -ForegroundColor Green
+            Write-Host "    ✓  Extracted to C:\Users\runneradmin" -ForegroundColor Green
           } catch {
-            Write-Host "  [WARN] Extract error: $_" -ForegroundColor Yellow
+            Write-Host "    ⚠  Extract warning: $_" -ForegroundColor Yellow
           }
           Remove-Item $backupZip -Force -ErrorAction SilentlyContinue
 
           $tgAppFolder = "C:\Users\runneradmin\AppData\Local\Telegram"
-          $tgExe = "$tgAppFolder\Telegram.exe"
+          $tgExe       = "$tgAppFolder\Telegram.exe"
           if (-not (Test-Path $tgExe)) {
             $found = Get-ChildItem $tgAppFolder -Recurse -Filter "Telegram.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($found) { $tgExe = $found.FullName }
           }
 
           if (Test-Path $tgExe) {
-            Write-Host "  [OK] Telegram restored at: $tgExe" -ForegroundColor Green
+            Write-Host "    ✓  Telegram restored at: $tgExe" -ForegroundColor Green
             $tdataPath = Join-Path (Split-Path $tgExe) "tdata"
             if (Test-Path $tdataPath) {
               $tdataSize = (Get-ChildItem $tdataPath -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-              Write-Host "  [OK] tdata: $([math]::Round($tdataSize/1MB,2)) MB" -ForegroundColor Green
+              Write-Host "    ✓  tdata: $([math]::Round($tdataSize/1MB,2)) MB" -ForegroundColor Green
             }
           }
 
           $regFile = "C:\Users\runneradmin\Documents\_rdp-config\desktop-icons.reg"
           if (Test-Path $regFile) {
-            Write-Host "  [OK] Desktop layout file found at: $regFile" -ForegroundColor Green
+            Write-Host "    ✓  Desktop layout file found" -ForegroundColor Green
             Copy-Item $regFile "C:\desktop-icons.reg" -Force
           } else {
-            Write-Host "  [INFO] No desktop layout file found" -ForegroundColor Yellow
+            Write-Host "    ⓘ  No desktop layout file found" -ForegroundColor Yellow
           }
 
+          Write-Host ""
+          Write-Host "  └─ Restore complete" -ForegroundColor Green
           Write-Host ""
 
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "Setup Telegram in AppData\Local"
+      - name: "[7/8]  Setup Telegram and Desktop"
         continue-on-error: true
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  Setting up Telegram in AppData\Local..." -ForegroundColor Magenta
+          Write-Host "  ┌─ Telegram and Desktop ────────────────────────────────┐" -ForegroundColor Yellow
           Write-Host ""
 
-          $userDir = "C:\Users\runneradmin"
-          $desktop = "$userDir\Desktop"
-          $tgFinalDir = "$userDir\AppData\Local\Telegram"
-          $tgExe = "$tgFinalDir\Telegram.exe"
-          $tgZip = "C:\telegram-portable.zip"
-          $tgExtractTemp = "C:\tg-temp-extract"
+          $userDir      = "C:\Users\runneradmin"
+          $desktop      = "$userDir\Desktop"
+          $tgFinalDir   = "$userDir\AppData\Local\Telegram"
+          $tgExe        = "$tgFinalDir\Telegram.exe"
+          $tgZip        = "C:\telegram-portable.zip"
+          $tgExtractTmp = "C:\tg-temp-extract"
 
           if (-not (Test-Path $desktop)) {
             New-Item -ItemType Directory -Path $desktop -Force | Out-Null
           }
 
           if (Test-Path $tgExe) {
-            Write-Host "  [OK] Telegram already exists at: $tgExe" -ForegroundColor Green
+            Write-Host "    ✓  Telegram already present" -ForegroundColor Green
           } else {
             $nested = "$tgFinalDir\Telegram\Telegram.exe"
             if (Test-Path $nested) {
-              Write-Host "  [INFO] Found nested Telegram folder - fixing structure..." -ForegroundColor Yellow
+              Write-Host "    ⌁  Fixing nested folder structure..." -ForegroundColor Yellow
               $nestedDir = "$tgFinalDir\Telegram"
               Get-ChildItem -Path $nestedDir -Force | ForEach-Object {
                 Move-Item -Path $_.FullName -Destination $tgFinalDir -Force
               }
               Remove-Item $nestedDir -Force -Recurse -ErrorAction SilentlyContinue
-              Write-Host "  [OK] Structure fixed" -ForegroundColor Green
+              Write-Host "    ✓  Structure fixed" -ForegroundColor Green
             } else {
-              Write-Host "  Downloading Telegram from B2..." -ForegroundColor Cyan
+              Write-Host "    ↓  Fetching Telegram from B2..." -ForegroundColor Cyan
 
               $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
               $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
               $env:AWS_DEFAULT_REGION    = $env:B2_REGION
-              $aws = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
+              $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
               $endpoint = "https://$env:B2_ENDPOINT"
 
               & $aws s3 cp "s3://$env:B2_BUCKET/telegram-portable.zip" $tgZip --endpoint-url $endpoint --no-progress
 
               if (-not (Test-Path $tgZip) -or ((Get-Item $tgZip).Length -eq 0)) {
-                Write-Host "  [FAIL] Could not download from B2" -ForegroundColor Red
+                Write-Host "    ⚠  Download from B2 failed" -ForegroundColor Yellow
                 $global:LASTEXITCODE = 0
                 exit 0
               }
 
               $sizeMB = [math]::Round((Get-Item $tgZip).Length / 1MB, 2)
-              Write-Host "  [OK] Downloaded: $sizeMB MB" -ForegroundColor Green
+              Write-Host "    ✓  Downloaded: $sizeMB MB" -ForegroundColor Green
 
-              if (Test-Path $tgExtractTemp) { Remove-Item $tgExtractTemp -Recurse -Force }
-              New-Item -ItemType Directory -Path $tgExtractTemp -Force | Out-Null
+              if (Test-Path $tgExtractTmp) { Remove-Item $tgExtractTmp -Recurse -Force }
+              New-Item -ItemType Directory -Path $tgExtractTmp -Force | Out-Null
 
-              Write-Host "  Extracting to temp folder..." -ForegroundColor Cyan
+              Write-Host "    Extracting archive..." -ForegroundColor Cyan
               try {
-                Expand-Archive -Path $tgZip -DestinationPath $tgExtractTemp -Force -ErrorAction Stop
-                Write-Host "  [OK] Extracted to temp" -ForegroundColor Green
+                Expand-Archive -Path $tgZip -DestinationPath $tgExtractTmp -Force -ErrorAction Stop
+                Write-Host "    ✓  Extracted to temp" -ForegroundColor Green
               } catch {
-                Write-Host "  [FAIL] Extract failed: $_" -ForegroundColor Red
+                Write-Host "    ⚠  Extract failed: $_" -ForegroundColor Yellow
                 $global:LASTEXITCODE = 0
                 exit 0
               }
               Remove-Item $tgZip -Force -ErrorAction SilentlyContinue
 
-              $foundExe = Get-ChildItem $tgExtractTemp -Recurse -Filter "Telegram.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+              $foundExe = Get-ChildItem $tgExtractTmp -Recurse -Filter "Telegram.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
               if (-not $foundExe) {
-                Write-Host "  [FAIL] Telegram.exe not found in archive" -ForegroundColor Red
-                Remove-Item $tgExtractTemp -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Host "    ⚠  Telegram.exe not found in archive" -ForegroundColor Yellow
+                Remove-Item $tgExtractTmp -Recurse -Force -ErrorAction SilentlyContinue
                 $global:LASTEXITCODE = 0
                 exit 0
               }
 
               $sourceDir = $foundExe.Directory.FullName
-              Write-Host "  Source dir: $sourceDir" -ForegroundColor Gray
-
               if (-not (Test-Path $tgFinalDir)) {
                 New-Item -ItemType Directory -Path $tgFinalDir -Force | Out-Null
               }
 
-              Write-Host "  Moving files to $tgFinalDir ..." -ForegroundColor Cyan
+              Write-Host "    Moving files to target..." -ForegroundColor Cyan
               Get-ChildItem -Path $sourceDir -Force | ForEach-Object {
                 Move-Item -Path $_.FullName -Destination $tgFinalDir -Force
               }
 
-              Remove-Item $tgExtractTemp -Recurse -Force -ErrorAction SilentlyContinue
-              Write-Host "  [OK] Telegram installed at: $tgFinalDir" -ForegroundColor Green
+              Remove-Item $tgExtractTmp -Recurse -Force -ErrorAction SilentlyContinue
+              Write-Host "    ✓  Installed at: $tgFinalDir" -ForegroundColor Green
             }
           }
 
@@ -488,117 +492,119 @@ jobs:
           }
 
           if (-not (Test-Path $tgExe)) {
-            Write-Host "  [FAIL] Telegram.exe not found at expected location" -ForegroundColor Red
+            Write-Host "    ⚠  Telegram.exe not found" -ForegroundColor Yellow
             $global:LASTEXITCODE = 0
             exit 0
           }
 
           $shortcut = "$desktop\Telegram.lnk"
-          Write-Host "  Creating shortcut pointing to: $tgExe" -ForegroundColor Cyan
+          Write-Host "    Creating desktop shortcut..." -ForegroundColor Cyan
           try {
             $ws = New-Object -ComObject WScript.Shell
             $sc = $ws.CreateShortcut($shortcut)
-            $sc.TargetPath = $tgExe
+            $sc.TargetPath       = $tgExe
             $sc.WorkingDirectory = Split-Path $tgExe
-            $sc.IconLocation = "$tgExe,0"
+            $sc.IconLocation     = "$tgExe,0"
             $sc.Save()
-            Write-Host "  [OK] Shortcut created at $shortcut" -ForegroundColor Green
+            Write-Host "    ✓  Shortcut created" -ForegroundColor Green
           } catch {
-            Write-Host "  [WARN] Shortcut failed: $_" -ForegroundColor Yellow
+            Write-Host "    ⚠  Shortcut failed: $_" -ForegroundColor Yellow
           }
 
           Write-Host ""
-          Write-Host "  -- Final Desktop contents --" -ForegroundColor Cyan
+          Write-Host "    Desktop contents:" -ForegroundColor Cyan
           Get-ChildItem $desktop -Force -ErrorAction SilentlyContinue | ForEach-Object {
-            Write-Host "    - $($_.Name)" -ForegroundColor White
+            Write-Host "      • $($_.Name)" -ForegroundColor Gray
           }
+
           Write-Host ""
-          Write-Host "  -- Telegram folder contents --" -ForegroundColor Cyan
+          Write-Host "    Telegram folder contents:" -ForegroundColor Cyan
           Get-ChildItem $tgFinalDir -Force -ErrorAction SilentlyContinue | ForEach-Object {
-            Write-Host "    - $($_.Name)" -ForegroundColor White
+            Write-Host "      • $($_.Name)" -ForegroundColor Gray
           }
+
+          Write-Host ""
+          Write-Host "  └─ Setup complete" -ForegroundColor Green
           Write-Host ""
 
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "Apply Desktop Layout and Restart Explorer"
+      - name: "[8/8]  Apply Desktop Layout"
         continue-on-error: true
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  Applying desktop icon layout..." -ForegroundColor Magenta
+          Write-Host "  ┌─ Desktop Layout ──────────────────────────────────────┐" -ForegroundColor Yellow
           Write-Host ""
 
-          Write-Host "  Ensuring system icons (This PC, Recycle Bin) are visible..." -ForegroundColor Cyan
+          Write-Host "    Enabling system icons..." -ForegroundColor Cyan
           $sysIconsKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel"
           if (-not (Test-Path $sysIconsKey)) {
             New-Item -Path $sysIconsKey -Force | Out-Null
           }
           Set-ItemProperty -Path $sysIconsKey -Name "{20D04FE0-3AEA-1069-A2D8-08002B30309D}" -Value 0 -Type DWord -Force
           Set-ItemProperty -Path $sysIconsKey -Name "{645FF040-5081-101B-9F08-00AA002F954E}" -Value 0 -Type DWord -Force
-          Write-Host "  [OK] System icons enabled" -ForegroundColor Green
+          Write-Host "    ✓  This PC and Recycle Bin enabled" -ForegroundColor Green
 
           $regFile = "C:\desktop-icons.reg"
           if (Test-Path $regFile) {
-            Write-Host "  Importing desktop layout from $regFile ..." -ForegroundColor Cyan
-            $importResult = reg import $regFile 2>&1
-            Write-Host "  $importResult" -ForegroundColor Gray
-            Write-Host "  [OK] Desktop layout imported" -ForegroundColor Green
+            Write-Host "    Importing layout..." -ForegroundColor Cyan
+            reg import $regFile 2>&1 | Out-Null
+            Write-Host "    ✓  Layout imported" -ForegroundColor Green
           } else {
-            Write-Host "  [INFO] No desktop layout reg file to import" -ForegroundColor Yellow
+            Write-Host "    ⓘ  No layout file to import" -ForegroundColor Yellow
           }
 
-          Write-Host "  Restarting Explorer to apply layout..." -ForegroundColor Cyan
+          Write-Host "    Restarting Explorer..." -ForegroundColor Cyan
           Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 3
           if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue)) {
             Start-Process explorer
           }
           Start-Sleep -Seconds 3
-          Write-Host "  [OK] Explorer restarted" -ForegroundColor Green
+          Write-Host "    ✓  Explorer restarted" -ForegroundColor Green
 
           Write-Host ""
-          Write-Host "  [OK] Desktop layout applied" -ForegroundColor Green
+          Write-Host "  └─ Layout applied" -ForegroundColor Green
           Write-Host ""
 
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "Display Connection Info"
+      - name: "Connection Information"
         shell: pwsh
         run: |
           $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
-          $tsIP = "$(& $tsExe ip -4 2>&1)".Trim()
+          $tsIP  = "$(& $tsExe ip -4 2>&1)".Trim()
 
           Write-Host ""
-          Write-Host "  ======================================================" -ForegroundColor Green
-          Write-Host "                RDP SERVER IS READY" -ForegroundColor Green
-          Write-Host "  ======================================================" -ForegroundColor Green
+          Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor Green
+          Write-Host "  ║              SERVER IS READY FOR CONNECTION          ║" -ForegroundColor Green
+          Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Green
           Write-Host ""
-          Write-Host "  ------------------------------------------------------" -ForegroundColor Cyan
-          Write-Host "  IP       : $tsIP" -ForegroundColor White
-          Write-Host "  Username : runneradmin" -ForegroundColor White
-          Write-Host "  Password : P@ssw0rd!2024" -ForegroundColor White
-          Write-Host "  Port     : 3389" -ForegroundColor White
-          Write-Host "  ------------------------------------------------------" -ForegroundColor Cyan
+          Write-Host "  ┌──────────────────────────────────────────────────────┐" -ForegroundColor Cyan
+          Write-Host "  │  IP Address  :  $($tsIP.PadRight(35))│" -ForegroundColor White
+          Write-Host "  │  Username    :  runneradmin                          │" -ForegroundColor White
+          Write-Host "  │  Password    :  P@ssw0rd!2024                        │" -ForegroundColor White
+          Write-Host "  │  Port        :  3389                                 │" -ForegroundColor White
+          Write-Host "  └──────────────────────────────────────────────────────┘" -ForegroundColor Cyan
           Write-Host ""
-          Write-Host "  Telegram is on Desktop - click to open" -ForegroundColor Yellow
+          Write-Host "  Telegram shortcut is available on the Desktop." -ForegroundColor Yellow
           Write-Host ""
 
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "Keep Server Alive (5 minutes)"
+      - name: "Keep Alive (5 minutes)"
         if: always()
         shell: pwsh
         run: |
-          Write-Host "  Keep Alive - 5 minutes" -ForegroundColor Cyan
+          Write-Host ""
+          Write-Host "  ┌─ Keep Alive ──────────────────────────────────────────┐" -ForegroundColor Cyan
           Write-Host ""
 
           $totalMinutes = 5
-          $startTime = Get-Date
-
           for ($i = 1; $i -le $totalMinutes; $i++) {
             Start-Sleep -Seconds 60
             $remaining = $totalMinutes - $i
@@ -607,14 +613,15 @@ jobs:
 
             if ($i % 5 -eq 0 -or $i -eq 1) {
               $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
-              $tsIP = "$(& $tsExe ip -4 2>&1)".Trim()
-              Write-Host "  [$i/$totalMinutes] remaining: ${h}h ${m}m | IP: $tsIP" -ForegroundColor Gray
+              $tsIP  = "$(& $tsExe ip -4 2>&1)".Trim()
+              Write-Host "    [$i/$totalMinutes]  remaining: ${h}h ${m}m   IP: $tsIP" -ForegroundColor Gray
             } else {
-              Write-Host "  [$i/$totalMinutes] remaining: ${h}h ${m}m" -ForegroundColor DarkGray
+              Write-Host "    [$i/$totalMinutes]  remaining: ${h}h ${m}m" -ForegroundColor DarkGray
             }
           }
+
           Write-Host ""
-          Write-Host "  [OK] Keep Alive finished" -ForegroundColor Green
+          Write-Host "  └─ Keep Alive finished" -ForegroundColor Green
           Write-Host ""
 
           $global:LASTEXITCODE = 0
@@ -626,7 +633,7 @@ jobs:
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  Creating backup..." -ForegroundColor Magenta
+          Write-Host "  ┌─ Backup ──────────────────────────────────────────────┐" -ForegroundColor Magenta
           Write-Host ""
 
           $userDir = "C:\Users\runneradmin"
@@ -648,21 +655,22 @@ jobs:
                 robocopy $Source $dest /E /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
               }
               $size = (Get-ChildItem $dest -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-              Write-Host "    [OK] $DestName : $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
+              Write-Host "    ✓  $($DestName.PadRight(12)) $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
             } else {
-              Write-Host "    [SKIP] $Source not found" -ForegroundColor DarkGray
+              Write-Host "    ⓘ  $($DestName.PadRight(12)) not found" -ForegroundColor DarkGray
             }
             $global:LASTEXITCODE = 0
           }
 
-          Write-Host "  Backing up user data..." -ForegroundColor Gray
+          Write-Host "    User folders:" -ForegroundColor Cyan
           Copy-Folder "$userDir\Desktop"   "Desktop"
           Copy-Folder "$userDir\Documents" "Documents"
           Copy-Folder "$userDir\Downloads" "Downloads"
           Copy-Folder "$userDir\Pictures"  "Pictures"
           Copy-Folder "$userDir\Videos"    "Videos"
 
-          Write-Host "  Backing up Telegram from AppData\Local..." -ForegroundColor Gray
+          Write-Host ""
+          Write-Host "    Application data:" -ForegroundColor Cyan
           $tgSrc = "$userDir\AppData\Local\Telegram"
           if (Test-Path $tgSrc) {
             $tgDest = "$stage\AppData\Local\Telegram"
@@ -671,16 +679,16 @@ jobs:
               /XD "cache" "temp" "user_data" "emoji" "webview" `
               /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
             $size = (Get-ChildItem $tgDest -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-            Write-Host "    [OK] Telegram: $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
+            Write-Host "    ✓  Telegram     $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
 
             $tdataCheck = "$tgDest\tdata"
             if (Test-Path $tdataCheck) {
               $tdataSize = (Get-ChildItem $tdataCheck -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-              Write-Host "    [OK] tdata: $([math]::Round($tdataSize/1MB,2)) MB" -ForegroundColor Green
+              Write-Host "    ✓  tdata        $([math]::Round($tdataSize/1MB,2)) MB" -ForegroundColor Green
             }
             $global:LASTEXITCODE = 0
           } else {
-            Write-Host "    [SKIP] Telegram folder not found" -ForegroundColor DarkGray
+            Write-Host "    ⓘ  Telegram     not found" -ForegroundColor DarkGray
           }
 
           $chromeSrc = "$userDir\AppData\Local\Google\Chrome\User Data\Default"
@@ -691,12 +699,12 @@ jobs:
               /XD "Cache" "Code Cache" "GPUCache" "Service Worker" "Application Cache" "Media Cache" "GrShaderCache" "ShaderCache" `
               /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
             $size = (Get-ChildItem $chromeDst -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-            Write-Host "    [OK] Chrome: $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
+            Write-Host "    ✓  Chrome       $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
             $global:LASTEXITCODE = 0
           }
 
           Write-Host ""
-          Write-Host "  Saving desktop icon layout..." -ForegroundColor Cyan
+          Write-Host "    Saving desktop layout..." -ForegroundColor Cyan
           $configDir = "$userDir\Documents\_rdp-config"
           if (-not (Test-Path $configDir)) {
             New-Item -ItemType Directory -Path $configDir -Force | Out-Null
@@ -722,7 +730,7 @@ jobs:
           }
 
           $regContent | Out-File -FilePath $regFile -Encoding ASCII
-          Write-Host "  [OK] Desktop layout saved" -ForegroundColor Green
+          Write-Host "    ✓  Desktop layout saved" -ForegroundColor Green
 
           $regStage = "$stage\Documents\_rdp-config"
           if (-not (Test-Path $regStage)) {
@@ -732,54 +740,62 @@ jobs:
           $global:LASTEXITCODE = 0
 
           Write-Host ""
-          Write-Host "  Compressing..." -ForegroundColor Yellow
+          Write-Host "    Compressing archive..." -ForegroundColor Cyan
           Compress-Archive -Path "$stage\*" -DestinationPath $zipPath -Force -CompressionLevel Optimal -ErrorAction SilentlyContinue
 
           if (Test-Path $zipPath) {
             $zipGB = [math]::Round((Get-Item $zipPath).Length / 1GB, 3)
-            Write-Host "  [OK] Backup created: $zipGB GB" -ForegroundColor Green
+            Write-Host "    ✓  Archive created: $zipGB GB" -ForegroundColor Green
 
             if ($zipGB -gt 10) {
-              Write-Host "  [WARN] Over 10GB - removing Downloads" -ForegroundColor Red
+              Write-Host "    ⚠  Over 10 GB — removing Downloads" -ForegroundColor Yellow
               Remove-Item "$stage\Downloads" -Recurse -Force -ErrorAction SilentlyContinue
               Remove-Item $zipPath -Force
               Compress-Archive -Path "$stage\*" -DestinationPath $zipPath -Force -CompressionLevel Optimal
-              Write-Host "  [OK] New size: $([math]::Round((Get-Item $zipPath).Length/1GB,3)) GB" -ForegroundColor Green
+              Write-Host "    ✓  New size: $([math]::Round((Get-Item $zipPath).Length/1GB,3)) GB" -ForegroundColor Green
             }
           }
 
           Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+
+          Write-Host ""
+          Write-Host "  └─ Backup complete" -ForegroundColor Green
           Write-Host ""
 
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "Upload Backup to B2"
+      - name: "Upload Backup"
         if: always()
         continue-on-error: true
         shell: pwsh
         run: |
-          Write-Host "  Uploading userdata.zip to B2..." -ForegroundColor Magenta
+          Write-Host ""
+          Write-Host "  ┌─ Upload ──────────────────────────────────────────────┐" -ForegroundColor Magenta
+          Write-Host ""
 
           $zipPath = "C:\userdata.zip"
           if (-not (Test-Path $zipPath)) {
-            Write-Host "  [SKIP] No backup file" -ForegroundColor Yellow
+            Write-Host "    ⓘ  No backup file found" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "  └─ Upload skipped" -ForegroundColor Green
+            Write-Host ""
             $global:LASTEXITCODE = 0
             exit 0
           }
 
           $sizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
-          Write-Host "  Size: $sizeMB MB" -ForegroundColor Cyan
+          Write-Host "    Archive size : $sizeMB MB" -ForegroundColor Cyan
 
           $env:AWS_ACCESS_KEY_ID     = $env:B2_KEY_ID
           $env:AWS_SECRET_ACCESS_KEY = $env:B2_APP_KEY
           $env:AWS_DEFAULT_REGION    = $env:B2_REGION
-          $aws = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
+          $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
           $endpoint = "https://$env:B2_ENDPOINT"
 
           $uploaded = $false
           for ($attempt = 1; $attempt -le 5; $attempt++) {
-            Write-Host "  Attempt $attempt/5..." -ForegroundColor Cyan
+            Write-Host "    ↑  attempt $attempt/5 ..." -ForegroundColor DarkGray
             & $aws s3 cp $zipPath "s3://$env:B2_BUCKET/userdata.zip" --endpoint-url $endpoint --no-progress
             if ($LASTEXITCODE -eq 0) {
               $uploaded = $true
@@ -788,25 +804,29 @@ jobs:
             Start-Sleep -Seconds 15
           }
 
+          Write-Host ""
           if ($uploaded) {
-            Write-Host "  [OK] Upload successful" -ForegroundColor Green
+            Write-Host "    ✓  Uploaded to B2" -ForegroundColor Green
           } else {
-            Write-Host "  [FAIL] Upload failed" -ForegroundColor Red
+            Write-Host "    ✗  Upload failed" -ForegroundColor Red
           }
+
+          Write-Host ""
+          Write-Host "  └─ Upload complete" -ForegroundColor Green
           Write-Host ""
 
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "Final Summary"
+      - name: "Run Summary"
         if: always()
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  ======================================================" -ForegroundColor Cyan
-          Write-Host "                    RUN SUMMARY" -ForegroundColor Cyan
-          Write-Host "  ======================================================" -ForegroundColor Cyan
+          Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+          Write-Host "  ║                    RUN SUMMARY                       ║" -ForegroundColor Cyan
+          Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Cyan
           Write-Host ""
-          Write-Host "  End time : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
-          Write-Host "  Status   : ${{ job.status }}" -ForegroundColor Gray
+          Write-Host "  End Time  :  $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
+          Write-Host "  Status    :  ${{ job.status }}" -ForegroundColor Gray
           Write-Host ""
