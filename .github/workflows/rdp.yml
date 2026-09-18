@@ -23,8 +23,8 @@ jobs:
         run: |
           Write-Host ""
           Write-Host "  ======================================================" -ForegroundColor Cyan
-          Write-Host "         GITHUB WINDOWS RDP - v12.0" -ForegroundColor Cyan
-          Write-Host "         User: Mehdi" -ForegroundColor Cyan
+          Write-Host "         GITHUB WINDOWS RDP - v12.1" -ForegroundColor Cyan
+          Write-Host "         User: MehdiRDP" -ForegroundColor Cyan
           Write-Host "  ======================================================" -ForegroundColor Cyan
           Write-Host ""
           Write-Host "  Start time : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
@@ -231,16 +231,16 @@ jobs:
           gpupdate /force 2>&1 | Out-Null
           Write-Host ""
 
-      - name: "Create Mehdi User"
+      - name: "Create MehdiRDP User"
         shell: pwsh
         run: |
           Write-Host ""
           Write-Host "  ======================================================" -ForegroundColor Magenta
-          Write-Host "  Creating user: Mehdi" -ForegroundColor Magenta
+          Write-Host "  Creating user: MehdiRDP" -ForegroundColor Magenta
           Write-Host "  ======================================================" -ForegroundColor Magenta
           Write-Host ""
 
-          $username = "Mehdi"
+          $username = "MehdiRDP"
           $plainPassword = $env:RDP_PASSWORD
 
           Write-Host "  Password length: $($plainPassword.Length)" -ForegroundColor Gray
@@ -284,14 +284,10 @@ jobs:
             Write-Host "  [OK] Profile folders created" -ForegroundColor Green
           }
 
-          net user runneradmin $plainPassword 2>$null | Out-Null
-          Add-LocalGroupMember -Group "Administrators" -Member "runneradmin" -ErrorAction SilentlyContinue
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "runneradmin" -ErrorAction SilentlyContinue
-
           Write-Host ""
           Get-LocalUser -Name $username | Format-Table Name, Enabled, LastLogon -AutoSize
           Write-Host ""
-          Write-Host "  [OK] Mehdi user is ready" -ForegroundColor Green
+          Write-Host "  [OK] MehdiRDP user is ready" -ForegroundColor Green
           Write-Host ""
 
       - name: "Ensure Telegram Portable on B2"
@@ -386,19 +382,19 @@ jobs:
           $sizeMB = [math]::Round((Get-Item $backupZip).Length / 1MB, 2)
           Write-Host "  [OK] Downloaded: $sizeMB MB" -ForegroundColor Green
 
-          Write-Host "  Extracting to C:\Users\Mehdi ..." -ForegroundColor Cyan
+          Write-Host "  Extracting to C:\Users\MehdiRDP ..." -ForegroundColor Cyan
           try {
-            Expand-Archive -Path $backupZip -DestinationPath "C:\Users\Mehdi" -Force -ErrorAction Stop
-            Write-Host "  [OK] Extracted to C:\Users\Mehdi" -ForegroundColor Green
+            Expand-Archive -Path $backupZip -DestinationPath "C:\Users\MehdiRDP" -Force -ErrorAction Stop
+            Write-Host "  [OK] Extracted to C:\Users\MehdiRDP" -ForegroundColor Green
           } catch {
             Write-Host "  [WARN] Extract error: $_" -ForegroundColor Yellow
           }
           Remove-Item $backupZip -Force -ErrorAction SilentlyContinue
 
-          $mehdiDesktop = "C:\Users\Mehdi\Desktop"
+          $mehdiDesktop = "C:\Users\MehdiRDP\Desktop"
           $restoredTg = "$mehdiDesktop\Telegram"
           if (Test-Path $restoredTg) {
-            Write-Host "  [OK] Telegram folder restored to Mehdi Desktop" -ForegroundColor Green
+            Write-Host "  [OK] Telegram folder restored to MehdiRDP Desktop" -ForegroundColor Green
             $tdataPath = "$restoredTg\tdata"
             if (Test-Path $tdataPath) {
               $tdataSize = (Get-ChildItem $tdataPath -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
@@ -406,7 +402,7 @@ jobs:
             }
           }
 
-          $regFile = "C:\Users\Mehdi\Documents\_rdp-config\desktop-icons.reg"
+          $regFile = "C:\Users\MehdiRDP\Documents\_rdp-config\desktop-icons.reg"
           if (Test-Path $regFile) {
             Write-Host "  Restoring desktop icon layout..." -ForegroundColor Cyan
             reg import $regFile 2>&1 | Out-Null
@@ -418,15 +414,15 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "Setup Telegram on Mehdi Desktop"
+      - name: "Setup Telegram on MehdiRDP Desktop"
         continue-on-error: true
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  Setting up Telegram on Mehdi's Desktop..." -ForegroundColor Magenta
+          Write-Host "  Setting up Telegram on MehdiRDP's Desktop..." -ForegroundColor Magenta
           Write-Host ""
 
-          $userDir = "C:\Users\Mehdi"
+          $userDir = "C:\Users\MehdiRDP"
           $desktop = "$userDir\Desktop"
 
           if (-not (Test-Path $desktop)) {
@@ -535,7 +531,7 @@ jobs:
           Write-Host ""
           Write-Host "  ------------------------------------------------------" -ForegroundColor Cyan
           Write-Host "  IP       : $tsIP" -ForegroundColor White
-          Write-Host "  Username : Mehdi" -ForegroundColor White
+          Write-Host "  Username : MehdiRDP" -ForegroundColor White
           Write-Host "  Password : P@ssw0rd!2024" -ForegroundColor White
           Write-Host "  Port     : 3389" -ForegroundColor White
           Write-Host "  ------------------------------------------------------" -ForegroundColor Cyan
@@ -583,10 +579,10 @@ jobs:
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  Creating backup for Mehdi..." -ForegroundColor Magenta
+          Write-Host "  Creating backup for MehdiRDP..." -ForegroundColor Magenta
           Write-Host ""
 
-          $userDir = "C:\Users\Mehdi"
+          $userDir = "C:\Users\MehdiRDP"
           $stage   = "C:\backup-stage"
           $zipPath = "C:\userdata.zip"
 
@@ -612,7 +608,7 @@ jobs:
             $global:LASTEXITCODE = 0
           }
 
-          Write-Host "  Backing up Mehdi's data..." -ForegroundColor Gray
+          Write-Host "  Backing up MehdiRDP's data..." -ForegroundColor Gray
           Copy-Folder "$userDir\Desktop"   "Desktop"
           Copy-Folder "$userDir\Documents" "Documents"
           Copy-Folder "$userDir\Downloads" "Downloads"
