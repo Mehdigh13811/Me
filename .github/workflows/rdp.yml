@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 env:
-  RDP_PASSWORD: 'P@ssw0rd!2024'
+  RDP_PASSWORD: 'MyStr0ng!Pass#2025'
   TAILSCALE_AUTHKEY: "tskey-auth-kM5gcJDL9B21CNTRL-dBrSevCy22avgAJ5j2kS2aviVpoQNKrF"
   B2_KEY_ID: "0047c90ff6f40880000000003"
   B2_APP_KEY: "K004GCg17BSNz0haTg+BN6lCp0k2/1o"
