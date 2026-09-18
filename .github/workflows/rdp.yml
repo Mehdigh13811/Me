@@ -23,7 +23,7 @@ jobs:
         run: |
           Write-Host ""
           Write-Host "  ======================================================" -ForegroundColor Cyan
-          Write-Host "         GITHUB WINDOWS RDP - v15.0" -ForegroundColor Cyan
+          Write-Host "         GITHUB WINDOWS RDP - v16.0" -ForegroundColor Cyan
           Write-Host "         User: runneradmin" -ForegroundColor Cyan
           Write-Host "         Telegram: AppData\Local\Telegram" -ForegroundColor Cyan
           Write-Host "  ======================================================" -ForegroundColor Cyan
@@ -363,7 +363,6 @@ jobs:
           }
           Remove-Item $backupZip -Force -ErrorAction SilentlyContinue
 
-          # Verify Telegram
           $tgAppFolder = "C:\Users\runneradmin\AppData\Local\Telegram"
           $tgExe = "$tgAppFolder\Telegram.exe"
           if (-not (Test-Path $tgExe)) {
@@ -382,9 +381,10 @@ jobs:
 
           $regFile = "C:\Users\runneradmin\Documents\_rdp-config\desktop-icons.reg"
           if (Test-Path $regFile) {
-            Write-Host "  Restoring desktop icon layout..." -ForegroundColor Cyan
-            reg import $regFile 2>&1 | Out-Null
-            Write-Host "  [OK] Desktop layout restored" -ForegroundColor Green
+            Write-Host "  [OK] Desktop layout file found at: $regFile" -ForegroundColor Green
+            Copy-Item $regFile "C:\desktop-icons.reg" -Force
+          } else {
+            Write-Host "  [INFO] No desktop layout file found" -ForegroundColor Yellow
           }
 
           Write-Host ""
@@ -402,7 +402,7 @@ jobs:
 
           $userDir = "C:\Users\runneradmin"
           $desktop = "$userDir\Desktop"
-          $tgFinalDir = "$userDir\AppData\Local\Telegram"       # Final destination
+          $tgFinalDir = "$userDir\AppData\Local\Telegram"
           $tgExe = "$tgFinalDir\Telegram.exe"
           $tgZip = "C:\telegram-portable.zip"
           $tgExtractTemp = "C:\tg-temp-extract"
@@ -411,15 +411,12 @@ jobs:
             New-Item -ItemType Directory -Path $desktop -Force | Out-Null
           }
 
-          # If Telegram already exists at correct path, skip download
           if (Test-Path $tgExe) {
             Write-Host "  [OK] Telegram already exists at: $tgExe" -ForegroundColor Green
           } else {
-            # Check if there is a nested Telegram folder from previous run
             $nested = "$tgFinalDir\Telegram\Telegram.exe"
             if (Test-Path $nested) {
               Write-Host "  [INFO] Found nested Telegram folder - fixing structure..." -ForegroundColor Yellow
-              Write-Host "  Moving contents from $tgFinalDir\Telegram to $tgFinalDir ..." -ForegroundColor Cyan
               $nestedDir = "$tgFinalDir\Telegram"
               Get-ChildItem -Path $nestedDir -Force | ForEach-Object {
                 Move-Item -Path $_.FullName -Destination $tgFinalDir -Force
@@ -446,7 +443,6 @@ jobs:
               $sizeMB = [math]::Round((Get-Item $tgZip).Length / 1MB, 2)
               Write-Host "  [OK] Downloaded: $sizeMB MB" -ForegroundColor Green
 
-              # Extract to temp folder first
               if (Test-Path $tgExtractTemp) { Remove-Item $tgExtractTemp -Recurse -Force }
               New-Item -ItemType Directory -Path $tgExtractTemp -Force | Out-Null
 
@@ -461,7 +457,6 @@ jobs:
               }
               Remove-Item $tgZip -Force -ErrorAction SilentlyContinue
 
-              # Find Telegram.exe in extracted folder
               $foundExe = Get-ChildItem $tgExtractTemp -Recurse -Filter "Telegram.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
               if (-not $foundExe) {
                 Write-Host "  [FAIL] Telegram.exe not found in archive" -ForegroundColor Red
@@ -473,8 +468,6 @@ jobs:
               $sourceDir = $foundExe.Directory.FullName
               Write-Host "  Source dir: $sourceDir" -ForegroundColor Gray
 
-              # Copy contents of the source folder (where Telegram.exe is) to final dir
-              # So Telegram.exe ends up at $tgFinalDir\Telegram.exe
               if (-not (Test-Path $tgFinalDir)) {
                 New-Item -ItemType Directory -Path $tgFinalDir -Force | Out-Null
               }
@@ -489,7 +482,6 @@ jobs:
             }
           }
 
-          # Ensure Telegram.exe exists now
           if (-not (Test-Path $tgExe)) {
             $found = Get-ChildItem $tgFinalDir -Recurse -Filter "Telegram.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($found) { $tgExe = $found.FullName }
@@ -501,7 +493,6 @@ jobs:
             exit 0
           }
 
-          # Create/update shortcut on Desktop
           $shortcut = "$desktop\Telegram.lnk"
           Write-Host "  Creating shortcut pointing to: $tgExe" -ForegroundColor Cyan
           try {
@@ -526,6 +517,49 @@ jobs:
           Get-ChildItem $tgFinalDir -Force -ErrorAction SilentlyContinue | ForEach-Object {
             Write-Host "    - $($_.Name)" -ForegroundColor White
           }
+          Write-Host ""
+
+          $global:LASTEXITCODE = 0
+          exit 0
+
+      - name: "Apply Desktop Layout and Restart Explorer"
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "  Applying desktop icon layout..." -ForegroundColor Magenta
+          Write-Host ""
+
+          Write-Host "  Ensuring system icons (This PC, Recycle Bin) are visible..." -ForegroundColor Cyan
+          $sysIconsKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel"
+          if (-not (Test-Path $sysIconsKey)) {
+            New-Item -Path $sysIconsKey -Force | Out-Null
+          }
+          Set-ItemProperty -Path $sysIconsKey -Name "{20D04FE0-3AEA-1069-A2D8-08002B30309D}" -Value 0 -Type DWord -Force
+          Set-ItemProperty -Path $sysIconsKey -Name "{645FF040-5081-101B-9F08-00AA002F954E}" -Value 0 -Type DWord -Force
+          Write-Host "  [OK] System icons enabled" -ForegroundColor Green
+
+          $regFile = "C:\desktop-icons.reg"
+          if (Test-Path $regFile) {
+            Write-Host "  Importing desktop layout from $regFile ..." -ForegroundColor Cyan
+            $importResult = reg import $regFile 2>&1
+            Write-Host "  $importResult" -ForegroundColor Gray
+            Write-Host "  [OK] Desktop layout imported" -ForegroundColor Green
+          } else {
+            Write-Host "  [INFO] No desktop layout reg file to import" -ForegroundColor Yellow
+          }
+
+          Write-Host "  Restarting Explorer to apply layout..." -ForegroundColor Cyan
+          Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 3
+          if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue)) {
+            Start-Process explorer
+          }
+          Start-Sleep -Seconds 3
+          Write-Host "  [OK] Explorer restarted" -ForegroundColor Green
+
+          Write-Host ""
+          Write-Host "  [OK] Desktop layout applied" -ForegroundColor Green
           Write-Host ""
 
           $global:LASTEXITCODE = 0
@@ -628,7 +662,6 @@ jobs:
           Copy-Folder "$userDir\Pictures"  "Pictures"
           Copy-Folder "$userDir\Videos"    "Videos"
 
-          # Backup Telegram from AppData\Local (exclude cache)
           Write-Host "  Backing up Telegram from AppData\Local..." -ForegroundColor Gray
           $tgSrc = "$userDir\AppData\Local\Telegram"
           if (Test-Path $tgSrc) {
@@ -669,15 +702,33 @@ jobs:
             New-Item -ItemType Directory -Path $configDir -Force | Out-Null
           }
           $regFile = "$configDir\desktop-icons.reg"
-          reg export "HKCU\Software\Microsoft\Windows\Shell\Bags\1\Desktop" $regFile /y 2>&1 | Out-Null
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "  [OK] Desktop layout saved" -ForegroundColor Green
-            $regStage = "$stage\Documents\_rdp-config"
-            if (-not (Test-Path $regStage)) {
-              New-Item -ItemType Directory -Path $regStage -Force | Out-Null
-            }
-            Copy-Item $regFile "$regStage\desktop-icons.reg" -Force
+
+          $regContent = @()
+          $regContent += "Windows Registry Editor Version 5.00"
+          $regContent += ""
+
+          $bagsFile = "$env:TEMP\bags.reg"
+          reg export "HKCU\Software\Microsoft\Windows\Shell\Bags\1\Desktop" $bagsFile /y 2>&1 | Out-Null
+          if (Test-Path $bagsFile) {
+            Get-Content $bagsFile | Select-Object -Skip 1 | ForEach-Object { $regContent += $_ }
+            Remove-Item $bagsFile -Force
           }
+
+          $bagMruFile = "$env:TEMP\bagmru.reg"
+          reg export "HKCU\Software\Microsoft\Windows\Shell\BagMRU" $bagMruFile /y 2>&1 | Out-Null
+          if (Test-Path $bagMruFile) {
+            Get-Content $bagMruFile | Select-Object -Skip 1 | ForEach-Object { $regContent += $_ }
+            Remove-Item $bagMruFile -Force
+          }
+
+          $regContent | Out-File -FilePath $regFile -Encoding ASCII
+          Write-Host "  [OK] Desktop layout saved" -ForegroundColor Green
+
+          $regStage = "$stage\Documents\_rdp-config"
+          if (-not (Test-Path $regStage)) {
+            New-Item -ItemType Directory -Path $regStage -Force | Out-Null
+          }
+          Copy-Item $regFile "$regStage\desktop-icons.reg" -Force
           $global:LASTEXITCODE = 0
 
           Write-Host ""
