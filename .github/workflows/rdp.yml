@@ -23,8 +23,9 @@ jobs:
         run: |
           Write-Host ""
           Write-Host "  ======================================================" -ForegroundColor Cyan
-          Write-Host "         GITHUB WINDOWS RDP - v13.1" -ForegroundColor Cyan
+          Write-Host "         GITHUB WINDOWS RDP - v14.0" -ForegroundColor Cyan
           Write-Host "         User: runneradmin" -ForegroundColor Cyan
+          Write-Host "         Telegram: AppData\Local" -ForegroundColor Cyan
           Write-Host "  ======================================================" -ForegroundColor Cyan
           Write-Host ""
           Write-Host "  Start time : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
@@ -362,17 +363,15 @@ jobs:
           }
           Remove-Item $backupZip -Force -ErrorAction SilentlyContinue
 
-          # Restore Telegram tdata to Program Files (x86)
-          $tgDataRestored = "C:\Users\runneradmin\ProgramFiles_x86_Telegram\tdata"
-          $tgDataTarget = "C:\Program Files (x86)\Telegram\tdata"
-          if (Test-Path $tgDataRestored) {
-            Write-Host "  Restoring Telegram tdata to Program Files (x86)..." -ForegroundColor Cyan
-            if (-not (Test-Path "C:\Program Files (x86)\Telegram")) {
-              New-Item -ItemType Directory -Path "C:\Program Files (x86)\Telegram" -Force | Out-Null
+          # Telegram is restored automatically to AppData\Local\Telegram (as part of user folder extraction)
+          $tgAppFolder = "C:\Users\runneradmin\AppData\Local\Telegram"
+          if (Test-Path $tgAppFolder) {
+            Write-Host "  [OK] Telegram restored to AppData\Local\Telegram" -ForegroundColor Green
+            $tdataPath = "$tgAppFolder\tdata"
+            if (Test-Path $tdataPath) {
+              $tdataSize = (Get-ChildItem $tdataPath -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+              Write-Host "  [OK] tdata: $([math]::Round($tdataSize/1MB,2)) MB" -ForegroundColor Green
             }
-            robocopy $tgDataRestored $tgDataTarget /E /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
-            Write-Host "  [OK] Telegram tdata restored" -ForegroundColor Green
-            $global:LASTEXITCODE = 0
           }
 
           $regFile = "C:\Users\runneradmin\Documents\_rdp-config\desktop-icons.reg"
@@ -387,17 +386,17 @@ jobs:
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "Setup Telegram in Program Files (x86)"
+      - name: "Setup Telegram in AppData\Local"
         continue-on-error: true
         shell: pwsh
         run: |
           Write-Host ""
-          Write-Host "  Setting up Telegram in Program Files (x86)..." -ForegroundColor Magenta
+          Write-Host "  Setting up Telegram in AppData\Local..." -ForegroundColor Magenta
           Write-Host ""
 
           $userDir = "C:\Users\runneradmin"
           $desktop = "$userDir\Desktop"
-          $tgDir = "C:\Program Files (x86)\Telegram"
+          $tgDir = "$userDir\AppData\Local\Telegram"
           $tgExe = "$tgDir\Telegram.exe"
           $tgZip = "C:\telegram-portable.zip"
 
@@ -503,16 +502,17 @@ jobs:
           Write-Host "  ------------------------------------------------------" -ForegroundColor Cyan
           Write-Host ""
           Write-Host "  Telegram is on Desktop - click to open" -ForegroundColor Yellow
+          Write-Host "  Telegram installed in: AppData\Local\Telegram" -ForegroundColor Gray
           Write-Host ""
 
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: "Keep Server Alive (5 minutes for test)"
+      - name: "Keep Server Alive (5 minutes)"
         if: always()
         shell: pwsh
         run: |
-          Write-Host "  Keep Alive - 5 minutes (Test Mode)" -ForegroundColor Cyan
+          Write-Host "  Keep Alive - 5 minutes" -ForegroundColor Cyan
           Write-Host ""
 
           $totalMinutes = 5
@@ -581,18 +581,26 @@ jobs:
           Copy-Folder "$userDir\Pictures"  "Pictures"
           Copy-Folder "$userDir\Videos"    "Videos"
 
-          # Backup Telegram tdata from Program Files (x86)
-          Write-Host "  Backing up Telegram tdata..." -ForegroundColor Gray
-          $tgDataSrc = "C:\Program Files (x86)\Telegram\tdata"
-          if (Test-Path $tgDataSrc) {
-            $tgDataDest = "$stage\ProgramFiles_x86_Telegram\tdata"
-            New-Item -ItemType Directory -Path $tgDataDest -Force | Out-Null
-            robocopy $tgDataSrc $tgDataDest /E /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
-            $size = (Get-ChildItem $tgDataDest -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-            Write-Host "    [OK] Telegram tdata: $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
+          # Backup Telegram from AppData\Local (only tdata + essential files, exclude cache)
+          Write-Host "  Backing up Telegram from AppData\Local..." -ForegroundColor Gray
+          $tgSrc = "$userDir\AppData\Local\Telegram"
+          if (Test-Path $tgSrc) {
+            $tgDest = "$stage\AppData\Local\Telegram"
+            New-Item -ItemType Directory -Path $tgDest -Force | Out-Null
+            robocopy $tgSrc $tgDest /E `
+              /XD "cache" "temp" "user_data" "emoji" "webview" `
+              /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
+            $size = (Get-ChildItem $tgDest -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+            Write-Host "    [OK] Telegram: $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
+
+            $tdataCheck = "$tgDest\tdata"
+            if (Test-Path $tdataCheck) {
+              $tdataSize = (Get-ChildItem $tdataCheck -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+              Write-Host "    [OK] tdata: $([math]::Round($tdataSize/1MB,2)) MB" -ForegroundColor Green
+            }
             $global:LASTEXITCODE = 0
           } else {
-            Write-Host "    [SKIP] Telegram tdata not found (maybe not logged in yet)" -ForegroundColor DarkGray
+            Write-Host "    [SKIP] Telegram folder not found (maybe not installed yet)" -ForegroundColor DarkGray
           }
 
           $chromeSrc = "$userDir\AppData\Local\Google\Chrome\User Data\Default"
