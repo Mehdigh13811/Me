@@ -25,7 +25,7 @@ jobs:
           $g = 'Gray'
           Write-Host ""
           Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor $c
-          Write-Host "  ║           GITHUB WINDOWS RDP SERVER  v16.4           ║" -ForegroundColor $c
+          Write-Host "  ║           GITHUB WINDOWS RDP SERVER  v16.5           ║" -ForegroundColor $c
           Write-Host "  ╠══════════════════════════════════════════════════════╣" -ForegroundColor $c
           Write-Host "  ║   User      :  runneradmin                           ║" -ForegroundColor $c
           Write-Host "  ║   Storage   :  Backblaze B2                          ║" -ForegroundColor $c
@@ -127,9 +127,22 @@ jobs:
             Write-Host "    ✗  No write access" -ForegroundColor Red
             exit 1
           }
-          & $aws s3api delete-object --bucket $env:B2_BUCKET --key "_connectivity.txt" --endpoint-url $endpoint 2>&1 | Out-Null
+
+          Write-Host "    Purging all versions of _connectivity.txt..." -ForegroundColor Cyan
+          $versions = & $aws s3api list-object-versions --bucket $env:B2_BUCKET --prefix "_connectivity.txt" --endpoint-url $endpoint --query "Versions[].VersionId" --output text 2>&1
+          if ($versions -and $LASTEXITCODE -eq 0 -and $versions -ne "None") {
+            foreach ($vid in ($versions -split '\s+' | Where-Object { $_ })) {
+              & $aws s3api delete-object --bucket $env:B2_BUCKET --key "_connectivity.txt" --version-id $vid --endpoint-url $endpoint 2>&1 | Out-Null
+            }
+          }
+          $markers = & $aws s3api list-object-versions --bucket $env:B2_BUCKET --prefix "_connectivity.txt" --endpoint-url $endpoint --query "DeleteMarkers[].VersionId" --output text 2>&1
+          if ($markers -and $LASTEXITCODE -eq 0 -and $markers -ne "None") {
+            foreach ($mid in ($markers -split '\s+' | Where-Object { $_ })) {
+              & $aws s3api delete-object --bucket $env:B2_BUCKET --key "_connectivity.txt" --version-id $mid --endpoint-url $endpoint 2>&1 | Out-Null
+            }
+          }
           Remove-Item $testFile -Force -ErrorAction SilentlyContinue
-          Write-Host "    ✓  Write access confirmed" -ForegroundColor Green
+          Write-Host "    ✓  Write access confirmed & test file purged" -ForegroundColor Green
 
           Write-Host ""
           Write-Host "    Bucket contents:" -ForegroundColor Cyan
@@ -376,6 +389,21 @@ jobs:
               $global:LASTEXITCODE = 0
               exit 0
             }
+
+            Write-Host "    Purge old versions of telegram-portable.zip..." -ForegroundColor Cyan
+            $tgVers = & $aws s3api list-object-versions --bucket $env:B2_BUCKET --prefix $tgZipName --endpoint-url $endpoint --query "Versions[].VersionId" --output text 2>&1
+            if ($tgVers -and $LASTEXITCODE -eq 0 -and $tgVers -ne "None") {
+              foreach ($vid in ($tgVers -split '\s+' | Where-Object { $_ })) {
+                & $aws s3api delete-object --bucket $env:B2_BUCKET --key $tgZipName --version-id $vid --endpoint-url $endpoint 2>&1 | Out-Null
+              }
+            }
+            $tgMarkers = & $aws s3api list-object-versions --bucket $env:B2_BUCKET --prefix $tgZipName --endpoint-url $endpoint --query "DeleteMarkers[].VersionId" --output text 2>&1
+            if ($tgMarkers -and $LASTEXITCODE -eq 0 -and $tgMarkers -ne "None") {
+              foreach ($mid in ($tgMarkers -split '\s+' | Where-Object { $_ })) {
+                & $aws s3api delete-object --bucket $env:B2_BUCKET --key $tgZipName --version-id $mid --endpoint-url $endpoint 2>&1 | Out-Null
+              }
+            }
+            Write-Host "    ✓  Old versions purged" -ForegroundColor Green
 
             Write-Host "    ↑  Uploading to B2..." -ForegroundColor Cyan
             for ($attempt = 1; $attempt -le 3; $attempt++) {
@@ -788,18 +816,6 @@ jobs:
             Write-Host "    ⓘ  Telegram     not found" -ForegroundColor DarkGray
           }
 
-          $chromeSrc = "$userDir\AppData\Local\Google\Chrome\User Data\Default"
-          $chromeDst = "$stage\AppData\Local\Google\Chrome\User Data\Default"
-          if (Test-Path $chromeSrc) {
-            New-Item -ItemType Directory -Path $chromeDst -Force | Out-Null
-            robocopy $chromeSrc $chromeDst /E `
-              /XD "Cache" "Code Cache" "GPUCache" "Service Worker" "Application Cache" "Media Cache" "GrShaderCache" "ShaderCache" `
-              /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
-            $size = (Get-ChildItem $chromeDst -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-            Write-Host "    ✓  Chrome       $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
-            $global:LASTEXITCODE = 0
-          }
-
           Write-Host ""
           Write-Host "    Saving desktop layout..." -ForegroundColor Cyan
           $configDir = "$userDir\Documents\_rdp-config"
@@ -888,6 +904,21 @@ jobs:
           $env:AWS_DEFAULT_REGION    = $env:B2_REGION
           $aws      = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
           $endpoint = "https://$env:B2_ENDPOINT"
+
+          Write-Host "    Purging old versions of userdata.zip..." -ForegroundColor Cyan
+          $oldVers = & $aws s3api list-object-versions --bucket $env:B2_BUCKET --prefix "userdata.zip" --endpoint-url $endpoint --query "Versions[].VersionId" --output text 2>&1
+          if ($oldVers -and $LASTEXITCODE -eq 0 -and $oldVers -ne "None") {
+            foreach ($vid in ($oldVers -split '\s+' | Where-Object { $_ })) {
+              & $aws s3api delete-object --bucket $env:B2_BUCKET --key "userdata.zip" --version-id $vid --endpoint-url $endpoint 2>&1 | Out-Null
+            }
+          }
+          $oldMarkers = & $aws s3api list-object-versions --bucket $env:B2_BUCKET --prefix "userdata.zip" --endpoint-url $endpoint --query "DeleteMarkers[].VersionId" --output text 2>&1
+          if ($oldMarkers -and $LASTEXITCODE -eq 0 -and $oldMarkers -ne "None") {
+            foreach ($mid in ($oldMarkers -split '\s+' | Where-Object { $_ })) {
+              & $aws s3api delete-object --bucket $env:B2_BUCKET --key "userdata.zip" --version-id $mid --endpoint-url $endpoint 2>&1 | Out-Null
+            }
+          }
+          Write-Host "    ✓  Old versions purged" -ForegroundColor Green
 
           $uploaded = $false
           for ($attempt = 1; $attempt -le 5; $attempt++) {
