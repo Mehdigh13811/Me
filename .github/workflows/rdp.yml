@@ -764,106 +764,52 @@ jobs:
           $stage       = "C:\backup-stage"
           $zipPath     = "C:\userdata.zip"
           $sevenZipExe = "C:\Program Files\7-Zip\7z.exe"
+          $tgTdata     = "$userDir\AppData\Local\Telegram\tdata"
 
           if (Test-Path $stage) { Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue }
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
           if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 
-          function Copy-Folder {
-            param($Source, $DestName, $Exclude = @())
-            if (Test-Path $Source) {
-              $dest = Join-Path $stage $DestName
-              New-Item -ItemType Directory -Path $dest -Force | Out-Null
-              if ($Exclude.Count -gt 0) {
-                robocopy $Source $dest /E /XD @Exclude /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
-              } else {
-                robocopy $Source $dest /E /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
-              }
-              $size = (Get-ChildItem $dest -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-              Write-Host "    ✓  $($DestName.PadRight(12)) $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
+          Write-Host "    Copying Telegram tdata (Account Data)..." -ForegroundColor Cyan
+          if (Test-Path $tgTdata) {
+            $destTdata = "$stage\tdata"
+            New-Item -ItemType Directory -Path $destTdata -Force | Out-Null
+            $robocopyCmd = "robocopy `"$tgTdata`" `"$destTdata`" /E /NFL /NDL /NJH /NJS /NC /NS /NP /MT:16"
+            Invoke-Expression $robocopyCmd | Out-Null
+            if ($LASTEXITCODE -ge 8) {
+                Write-Host "    ⚠  Robocopy warning (Code: $LASTEXITCODE)" -ForegroundColor Yellow
             } else {
-              Write-Host "    ⓘ  $($DestName.PadRight(12)) not found" -ForegroundColor DarkGray
+                Write-Host "    ✓  tdata copied successfully" -ForegroundColor Green
             }
-            $global:LASTEXITCODE = 0
-          }
-
-          Write-Host "    User folders:" -ForegroundColor Cyan
-          Copy-Folder "$userDir\Desktop"   "Desktop"
-          Copy-Folder "$userDir\Documents" "Documents"
-          Copy-Folder "$userDir\Downloads" "Downloads"
-          Copy-Folder "$userDir\Pictures"  "Pictures"
-          Copy-Folder "$userDir\Videos"    "Videos"
-
-          Write-Host ""
-          Write-Host "    Application data:" -ForegroundColor Cyan
-          $tgSrc = "$userDir\AppData\Local\Telegram"
-          if (Test-Path $tgSrc) {
-            $tgDest = "$stage\AppData\Local\Telegram"
-            New-Item -ItemType Directory -Path $tgDest -Force | Out-Null
-            robocopy $tgSrc $tgDest /E `
-              /XD "cache" "temp" "user_data" "emoji" "webview" `
-              /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
-            $size = (Get-ChildItem $tgDest -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-            Write-Host "    ✓  Telegram     $([math]::Round($size/1MB,2)) MB" -ForegroundColor Green
-
-            $tdataCheck = "$tgDest\tdata"
-            if (Test-Path $tdataCheck) {
-              $tdataSize = (Get-ChildItem $tdataCheck -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-              Write-Host "    ✓  tdata        $([math]::Round($tdataSize/1MB,2)) MB" -ForegroundColor Green
-            }
-            $global:LASTEXITCODE = 0
           } else {
-            Write-Host "    ⓘ  Telegram     not found" -ForegroundColor DarkGray
+            Write-Host "    ⓘ  tdata folder not found. Skipping Telegram backup." -ForegroundColor DarkGray
           }
 
           Write-Host ""
           Write-Host "    Saving desktop layout..." -ForegroundColor Cyan
-          $configDir = "$userDir\Documents\_rdp-config"
+          $configDir = "$stage\Documents\_rdp-config"
           if (-not (Test-Path $configDir)) {
             New-Item -ItemType Directory -Path $configDir -Force | Out-Null
           }
           $regFile = "$configDir\desktop-icons.reg"
-
-          $regContent = @()
-          $regContent += "Windows Registry Editor Version 5.00"
-          $regContent += ""
-
+          $regContent = @("Windows Registry Editor Version 5.00", "")
           $bagsFile = "$env:TEMP\bags.reg"
           reg export "HKCU\Software\Microsoft\Windows\Shell\Bags\1\Desktop" $bagsFile /y 2>&1 | Out-Null
           if (Test-Path $bagsFile) {
             Get-Content $bagsFile | Select-Object -Skip 1 | ForEach-Object { $regContent += $_ }
-            Remove-Item $bagsFile -Force
+            Remove-Item $bagsFile -Force -ErrorAction SilentlyContinue
           }
-
-          $bagMruFile = "$env:TEMP\bagmru.reg"
-          reg export "HKCU\Software\Microsoft\Windows\Shell\BagMRU" $bagMruFile /y 2>&1 | Out-Null
-          if (Test-Path $bagMruFile) {
-            Get-Content $bagMruFile | Select-Object -Skip 1 | ForEach-Object { $regContent += $_ }
-            Remove-Item $bagMruFile -Force
-          }
-
           $regContent | Out-File -FilePath $regFile -Encoding ASCII
           Write-Host "    ✓  Desktop layout saved" -ForegroundColor Green
 
-          $regStage = "$stage\Documents\_rdp-config"
-          if (-not (Test-Path $regStage)) {
-            New-Item -ItemType Directory -Path $regStage -Force | Out-Null
-          }
-          Copy-Item $regFile "$regStage\desktop-icons.reg" -Force
-          $global:LASTEXITCODE = 0
-
           Write-Host ""
-          Write-Host "    Compressing with 7-Zip (store mode - no compression)..." -ForegroundColor Cyan
-
-          & $sevenZipExe a -tzip $zipPath "$stage\*" -mx0 -y -bso0 -bsp0 2>&1 | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "    ⚠  7z store failed, retrying with -mmt..." -ForegroundColor Yellow
-            & $sevenZipExe a -tzip $zipPath "$stage\*" -mx0 -mmt=on -y 2>&1 | Out-Null
-          }
+          Write-Host "    Compressing (Fast Store Mode)..." -ForegroundColor Cyan
+          $compressCmd = "& `"$sevenZipExe`" a -tzip `"$zipPath`" `"$stage\*`" -mx0 -mmt=on -y -bso0 -bsp0"
+          Invoke-Expression $compressCmd | Out-Null
 
           if (Test-Path $zipPath) {
-            $zipGB = [math]::Round((Get-Item $zipPath).Length / 1GB, 3)
-            Write-Host "    ✓  Archive created: $zipGB GB" -ForegroundColor Green
+            $zipMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
+            Write-Host "    ✓  Archive created: $zipMB MB" -ForegroundColor Green
           } else {
             Write-Host "    ✗  Archive creation failed" -ForegroundColor Red
           }
